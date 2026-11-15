@@ -607,3 +607,8 @@ select.in { appearance: none; padding-right: 34px; background: var(--surface) ur
 .inv-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .inv-logo { height: 56px; width: auto; max-width: 180px; object-fit: contain; }
 @media (max-width: 860px) { .side .brand { flex-direction: row; } }
+
+.powered-auth { margin-top: 18px; font-size: 13px; color: var(--side-muted); }
+.powered-auth b { color: #fff; }
+.powered-line { font-size: 13px; color: var(--muted); margin-top: -12px; }
+.powered-line b { color: var(--ink); }

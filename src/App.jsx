@@ -19,7 +19,7 @@ import { AddCategory, AddCost, AddFactory, AddSupplier, FactoryBill, NewFactoryO
 import { AddExpense, EmployeeSheet, Payroll } from './sheets/money.jsx'
 import { Collect, DealerSheet, DealerStatement, InvoiceLine, ViewInvoice } from './sheets/selling.jsx'
 import Platform from './pages/Platform.jsx'
-import { BRAND, Button, Icon, Logo, Sheet, UIProvider, cls, go, useRoute, useSheetItem, useSheets, useToast } from './ui.jsx'
+import { Button, POWERED_BY, Icon, Logo, Sheet, UIProvider, cls, go, useRoute, useSheetItem, useSheets, useToast } from './ui.jsx'
 
 const NAV = [
   { items: [{ path: 'dashboard', label: 'Dashboard', tab: 'Home', icon: 'home' }] },
@@ -174,7 +174,7 @@ function Shell() {
           </span>
         </a>
         <nav aria-label="Sections"><NavList current={current} /></nav>
-        <div className="powered">Powered by <b>{BRAND}</b></div>
+        <div className="powered">Powered by <b>{POWERED_BY}</b></div>
         <Account />
       </aside>
 

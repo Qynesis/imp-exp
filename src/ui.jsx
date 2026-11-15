@@ -29,6 +29,8 @@ export function Icon({ name, size = 20 }) {
 }
 
 export const BRAND = 'Star Bangla Trading'
+/** The software maker, shown as “Powered by …”. */
+export const POWERED_BY = 'Qynesis'
 /**
  * Brand logo: the Star Bangla Trading artwork as supplied. `src` shows a company's own logo instead.
  * On dark backgrounds the image sits on a white tile so the orange and green read properly.

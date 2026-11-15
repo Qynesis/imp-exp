@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { fdate, plural } from '../lib/format.js'
 import { BUSINESS_TYPES } from '../lib/presets.js'
 import { useStore } from '../lib/store.jsx'
-import { BRAND, Button, Card, DataTable, Empty, Logo, Stat, useToast } from '../ui.jsx'
+import { BRAND, Button, Card, DataTable, Empty, Logo, POWERED_BY, Stat, useToast } from '../ui.jsx'
 
 /** The operator's view: every company on the platform, with a way into each one. */
 export default function Platform() {
@@ -39,6 +39,7 @@ export default function Platform() {
         <Logo height={56} />
         <Button variant="secondary" onClick={platformSignOut}>Sign out</Button>
       </div>
+      <p className="powered-line">Powered by <b>{POWERED_BY}</b></p>
       <header className="page-head">
         <div className="page-title">
           <h1>All companies</h1>

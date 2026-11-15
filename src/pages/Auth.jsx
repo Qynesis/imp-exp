@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BUSINESS_TYPES } from '../lib/presets.js'
 import { useStore } from '../lib/store.jsx'
-import { Button, Field, Logo, Segmented, cls, useForm } from '../ui.jsx'
+import { Button, Field, Logo, POWERED_BY, Segmented, cls, useForm } from '../ui.jsx'
 
 export default function Auth() {
   const { signIn, status } = useStore()
@@ -65,6 +65,7 @@ export default function Auth() {
         <Logo height={96} light />
         <b>Books for importers and exporters</b>
         <p>Factory orders, LC shipments, customs clearance, stock, dealer sales, dues and payroll. One private set of books for each company.</p>
+        <span className="powered-auth">Powered by <b>{POWERED_BY}</b></span>
       </div>
       <form className="auth-card" onSubmit={submit} noValidate>
         <h1>{signup ? 'Create your company' : 'Sign in'}</h1>
