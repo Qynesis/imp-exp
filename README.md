@@ -8,7 +8,8 @@ dealer sales and invoices, cashbook and dues, payroll, reports, roles and custom
 
 ```
 npm install
-npm run dev        # starts the app and, with it, the books server on :8787
+npm run dev                         # frontend only, books kept in the browser
+VITE_BACKEND=server npm run dev     # also starts the books server on :8787
 ```
 
 Open the app, choose "New company" and sign up. Tick "sample data" to look around.
@@ -27,17 +28,21 @@ The operator of Star Bangla Trading has a separate sign-in that lists every comp
 Sign in with it on the normal sign-in screen. Every use is recorded in `server/data/audit.log` (with Postgres: the `audit` table).
 User passwords are stored only as hashes, so nobody can read them back; reset one instead.
 
-## Put it on Vercel
+## Two ways to run
 
-Vercel hosts the app as static files plus one serverless function (`api/index.js`) for the API.
-Serverless functions have no disk, so the books live in Postgres.
+- **Frontend only (default).** No server and no database: companies, logins and books are kept in the
+  browser's storage on that device. This is what Vercel hosts right now. Demo logins and the platform
+  owner (`admin@starbangla.local`) all use the password `demo1234`.
+- **With the server.** Shared books for many users and devices. Build and run with `VITE_BACKEND=server`
+  (for example `VITE_BACKEND=server npm run dev`), see below.
 
-1. Import the repository in Vercel (framework: Vite). The first deploy will show "no database yet" on the sign-in page.
-2. In the Vercel project open **Storage → Create database → Neon (Postgres)** and connect it. This sets `DATABASE_URL`.
-3. Under **Settings → Environment Variables** add `PLATFORM_ADMIN_PASSWORD` (your platform-owner password) and, if you want the demo logins, `DEMO_ACCOUNTS=1`.
-4. Redeploy. Sign up your first company, or sign in as the platform owner.
+## Put it on Vercel (frontend only)
 
-Limits of serverless hosting: one request may carry at most 4.5 MB, so keep company logos small (the app already shrinks them) and expect very large books to need a long-running server instead.
+Import the repository in Vercel (framework: Vite) and deploy. Nothing else is needed.
+
+To move to the shared server later: move `server/vercel-api.js` to `api/index.js`, add the rewrite
+`{ "source": "/api/:path*", "destination": "/api?path=:path*" }` to `vercel.json`, add Neon (Postgres)
+under Storage, set `VITE_BACKEND=server` and `PLATFORM_ADMIN_PASSWORD`, and redeploy.
 
 ## Put it on your own server
 

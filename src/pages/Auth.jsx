@@ -19,7 +19,7 @@ export default function Auth() {
     const check = () => status()
       .then((r) => {
         if (!live) return
-        if (r.ok) return setServer({ state: 'up', demo: r.demo, problem: '' })
+        if (r.ok) return setServer({ state: 'up', demo: r.demo, problem: '', local: !!r.local })
         setServer({ state: 'down', demo: null, problem: r.problem })
         timer = setTimeout(check, 5000)
       })
@@ -102,10 +102,13 @@ export default function Auth() {
           )}
         </div>
         <Button type="submit" block disabled={busy || server.state === 'down'}>{busy ? 'Please wait' : signup ? 'Create company' : 'Sign in'}</Button>
+        {server.local && (
+          <p className="t-muted small tight">Running in this browser only: companies and books are saved on this device, not on a server.</p>
+        )}
         {!signup && server.demo && (
           <div className="demo-box">
             <b>Demo logins</b>
-            <span>One sample company, one login per role. Password for all: <code>{server.demo.password}</code></span>
+            <span>{server.local ? 'A sample company, one login per role, and the platform owner.' : 'One sample company, one login per role.'} Password for all: <code>{server.demo.password}</code></span>
             <div className="demo-list">
               {server.demo.logins.map((l) => (
                 <button key={l.email} type="button" className="demo-row" disabled={busy} onClick={() => demoLogin(l.email)}>

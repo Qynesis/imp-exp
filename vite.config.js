@@ -19,7 +19,7 @@ function booksServer() {
     name: 'books-server',
     apply: 'serve',
     async configureServer(server) {
-      if (await portInUse(API_PORT)) return
+      if (process.env.VITE_BACKEND !== 'server' || (await portInUse(API_PORT))) return
       child = spawn('node', ['--watch', 'server/index.js'], { stdio: 'inherit', env: { DEMO_ACCOUNTS: '1', ...process.env, PORT: String(API_PORT) } })
       child.on('exit', (code) => code && server.config.logger.error(`The books server stopped (exit ${code}). Sign-in will not work until it runs again: npm run server`))
       const stop = () => child && child.kill()

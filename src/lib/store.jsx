@@ -1,7 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { applyBusinessTypes } from './presets.js'
+import { localCall } from './localApi.js'
 import { byId, importCalc } from './selectors.js'
+
+/** 'local' keeps everything in this browser (frontend-only hosting). Build with VITE_BACKEND=server to use the real server. */
+export const BACKEND = import.meta.env.VITE_BACKEND === 'server' ? 'server' : 'local'
 
 const TOKEN_KEY = 'books-session'
 const PLAT_KEY = 'books-platform'
@@ -22,6 +26,7 @@ const setToken = (t, key = TOKEN_KEY) => {
 }
 
 async function call(method, path, body, token) {
+  if (BACKEND === 'local') return localCall(method, path, body, token)
   let res
   try {
     res = await fetch('/api/' + path, {

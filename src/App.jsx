@@ -216,12 +216,20 @@ function Gate() {
   return <Shell />
 }
 
+/** Sheets, toasts and dialogs belong to one signed-in session: they all close when you sign in, out or switch company. */
+function SessionUI() {
+  const { phase, session } = useStore()
+  return (
+    <UIProvider key={`${phase}:${session?.tenantId || ''}:${session?.userId || ''}`} registry={SHEETS}>
+      <Gate />
+    </UIProvider>
+  )
+}
+
 export default function App() {
   return (
     <StoreProvider>
-      <UIProvider registry={SHEETS}>
-        <Gate />
-      </UIProvider>
+      <SessionUI />
     </StoreProvider>
   )
 }

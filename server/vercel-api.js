@@ -1,9 +1,11 @@
 /**
- * The books API as a Vercel serverless function. Every /api/* request is rewritten here by vercel.json.
+ * The books API as a Vercel serverless function. NOT deployed right now (the app runs frontend-only).
+ * To turn the server on later: move this file to api/index.js, restore the /api rewrite in vercel.json,
+ * add Neon (Postgres) in Vercel Storage, and set VITE_BACKEND=server.
  * Data lives in Postgres: add Neon from the Vercel Marketplace (Storage tab) so DATABASE_URL is set.
  */
-import { createApp } from '../server/app.js'
-import { missingStore, pgStore } from '../server/store-pg.js'
+import { createApp } from './app.js'
+import { missingStore, pgStore } from './store-pg.js'
 
 const DB_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL
 const store = DB_URL
