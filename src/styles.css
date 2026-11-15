@@ -575,18 +575,17 @@ select.in { appearance: none; padding-right: 34px; background: var(--surface) ur
 }
 @media print { .view-only, .account { display: none !important; } }
 
-/* ---------- QynTrading brand and platform owner ---------- */
-.logo { display: inline-flex; align-items: center; gap: 10px; flex: none; }
-.logo svg { display: block; border-radius: 28%; }
-.logo-word { font: 500 22px/1 var(--display); letter-spacing: -0.02em; color: var(--ink); }
-.logo-word b { font-weight: 700; }
-.logo.light .logo-word { color: #fff; }
-.side .brand { display: flex; align-items: center; gap: 10px; }
+/* ---------- brand and platform owner ---------- */
+.logo { display: inline-flex; align-items: center; flex: none; max-width: 100%; }
+.logo img { display: block; height: var(--h); width: auto; max-width: 100%; object-fit: contain; }
+.logo.light { background: #fff; border-radius: 10px; padding: 6px 10px; }
+.side .brand { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .brand-text { min-width: 0; }
 .topbar .brand { align-items: center; flex-wrap: nowrap; gap: 10px; }
+.topbar .logo.light { padding: 3px 6px; border-radius: 7px; }
 .powered { font-size: 12px; color: var(--side-muted); padding: 10px 10px 0; }
 .powered b { color: var(--side-text); }
-.auth-side .logo { margin-bottom: 14px; }
+.auth-side .logo { margin-bottom: 14px; align-self: flex-start; }
 .platform { max-width: 1040px; margin: 0 auto; padding: 28px 20px 60px; display: flex; flex-direction: column; gap: 20px; }
 .platform-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .co-card .card-head { align-items: flex-start; }
@@ -601,3 +600,10 @@ select.in { appearance: none; padding-right: 34px; background: var(--surface) ur
 .demo-row:hover:not(:disabled) { background: var(--fill); }
 .demo-row b { display: block; color: var(--ink); }
 .auth-card .err b { font-weight: 700; }
+
+.logo-pick { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.logo-preview { min-width: 160px; min-height: 84px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px; background: var(--surface); }
+.logo-preview.empty { border-style: dashed; }
+.inv-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.inv-logo { height: 56px; width: auto; max-width: 180px; object-fit: contain; }
+@media (max-width: 860px) { .side .brand { flex-direction: row; } }

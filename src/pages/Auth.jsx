@@ -5,7 +5,7 @@ import { Button, Field, Logo, Segmented, cls, useForm } from '../ui.jsx'
 
 export default function Auth() {
   const { signIn, status } = useStore()
-  const [server, setServer] = useState({ state: 'checking', demo: null })
+  const [server, setServer] = useState({ state: 'checking', demo: null, problem: '' })
   const [mode, setMode] = useState('login')
   const [v, set, bind] = useForm({ company: '', name: '', email: '', password: '', businessTypes: ['general'], sample: false })
   const [err, setErr] = useState('')
@@ -17,10 +17,15 @@ export default function Auth() {
     let timer
     let live = true
     const check = () => status()
-      .then((r) => live && setServer({ state: 'up', demo: r.demo }))
-      .catch(() => {
+      .then((r) => {
         if (!live) return
-        setServer({ state: 'down', demo: null })
+        if (r.ok) return setServer({ state: 'up', demo: r.demo, problem: '' })
+        setServer({ state: 'down', demo: null, problem: r.problem })
+        timer = setTimeout(check, 5000)
+      })
+      .catch((e) => {
+        if (!live) return
+        setServer({ state: 'down', demo: null, problem: e.status ? e.message : '' })
         timer = setTimeout(check, 3000)
       })
     check()
@@ -57,7 +62,7 @@ export default function Auth() {
   return (
     <div className="auth">
       <div className="auth-side">
-        <Logo size={44} wordmark light />
+        <Logo height={96} light />
         <b>Books for importers and exporters</b>
         <p>Factory orders, LC shipments, customs clearance, stock, dealer sales, dues and payroll. One private set of books for each company.</p>
       </div>
@@ -66,7 +71,7 @@ export default function Auth() {
         <Segmented label="Sign in or create" value={mode} onChange={(m) => { setMode(m); setErr('') }} options={[{ value: 'login', label: 'Sign in' }, { value: 'signup', label: 'New company' }]} />
         {server.state === 'down' && (
           <div className="err" role="alert">
-            The books server is not running, so sign-in cannot work yet. In the project folder run <b>npm run dev</b> (or <b>npm run server</b>). This page reconnects by itself.
+            {server.problem || <>The server did not answer, so sign-in cannot work yet. On your own computer run <b>npm run dev</b> in the project folder. On a hosted site, check the deployment logs.</>} This page keeps retrying by itself.
           </div>
         )}
         {err && <div className="err" role="alert">{err}</div>}

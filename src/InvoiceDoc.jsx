@@ -12,9 +12,12 @@ export default function InvoiceDoc({ db, inv }) {
   return (
     <div className="invoice">
       <div className="inv-top">
-        <div>
+        <div className="inv-brand">
+          {co.logo && <img className="inv-logo" src={co.logo} alt="" />}
+          <div>
           <div className="inv-co">{co.name || 'Your company'}</div>
           {contact && <div className="inv-muted">{contact}</div>}
+          </div>
         </div>
         <div className="inv-right">
           <div className="inv-title">{inv.status === 'draft' ? 'Draft invoice' : 'Invoice'}</div>

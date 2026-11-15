@@ -8,7 +8,7 @@ export function emptyDb() {
   return {
     v: 1,
     seq: { id: 100, ts: 0, fo: 1001, inv: 1, imp: 1, exp: 1, pb: 1 },
-    company: { name: '', tagline: 'Import and trading', phone: '', address: '', invoicePrefix: 'INV-', invoiceNote: '' },
+    company: { name: '', tagline: 'Import and trading', phone: '', address: '', invoicePrefix: 'INV-', invoiceNote: '', logo: '' },
     users: [],
     roles: defaultRoles(),
     businessTypes: [],

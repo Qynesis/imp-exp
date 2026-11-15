@@ -25,3 +25,5 @@ dist-ssr
 
 # company books saved by the server
 server/data
+.vercel
+.env

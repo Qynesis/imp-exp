@@ -19,7 +19,7 @@ import { AddCategory, AddCost, AddFactory, AddSupplier, FactoryBill, NewFactoryO
 import { AddExpense, EmployeeSheet, Payroll } from './sheets/money.jsx'
 import { Collect, DealerSheet, DealerStatement, InvoiceLine, ViewInvoice } from './sheets/selling.jsx'
 import Platform from './pages/Platform.jsx'
-import { Button, Icon, Logo, Sheet, UIProvider, cls, go, useRoute, useSheetItem, useSheets, useToast } from './ui.jsx'
+import { BRAND, Button, Icon, Logo, Sheet, UIProvider, cls, go, useRoute, useSheetItem, useSheets, useToast } from './ui.jsx'
 
 const NAV = [
   { items: [{ path: 'dashboard', label: 'Dashboard', tab: 'Home', icon: 'home' }] },
@@ -167,20 +167,20 @@ function Shell() {
     <div className="shell">
       <aside className="side">
         <a className="brand" href={'#/' + first}>
-          <Logo size={34} />
+          <Logo height={64} src={co.logo} light />
           <span className="brand-text">
             <b>{co.name || 'Your company'}</b>
             <span>{co.tagline}</span>
           </span>
         </a>
         <nav aria-label="Sections"><NavList current={current} /></nav>
-        <div className="powered">Powered by <b>Qyn</b>Trading</div>
+        <div className="powered">Powered by <b>{BRAND}</b></div>
         <Account />
       </aside>
 
       <header className="topbar">
         <div className="brand">
-          <Logo size={28} />
+          <Logo height={36} src={co.logo} light />
           <b>{co.name || 'Your company'}</b>
         </div>
       </header>

@@ -28,17 +28,15 @@ export function Icon({ name, size = 20 }) {
   )
 }
 
-/** QynTrading mark: a Q drawn as a trade ring with a mint tail, on a deep green tile. */
-export function Logo({ size = 32, wordmark, light }) {
+export const BRAND = 'Star Bangla Trading'
+/**
+ * Brand logo: the Star Bangla Trading artwork as supplied. `src` shows a company's own logo instead.
+ * On dark backgrounds the image sits on a white tile so the orange and green read properly.
+ */
+export function Logo({ height = 44, src, light, className }) {
   return (
-    <span className={cls('logo', light && 'light')}>
-      <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
-        <rect width="40" height="40" rx="11" fill="#0f7363" />
-        <path d="M20 9.5a10.5 10.5 0 1 0 7.4 17.9" fill="none" stroke="#fff" strokeWidth="4.2" strokeLinecap="round" />
-        <path d="M20 9.5a10.5 10.5 0 0 1 9.6 14.7" fill="none" stroke="#fff" strokeWidth="4.2" strokeLinecap="round" opacity=".55" />
-        <path d="M22.5 22.5 31 31" fill="none" stroke="#8ff0d8" strokeWidth="4.6" strokeLinecap="round" />
-      </svg>
-      {wordmark && <span className="logo-word"><b>Qyn</b>Trading</span>}
+    <span className={cls('logo', light && 'light', className)} style={{ '--h': height + 'px' }}>
+      <img src={src || '/brand-logo.png'} alt={src ? 'Company logo' : BRAND} />
     </span>
   )
 }

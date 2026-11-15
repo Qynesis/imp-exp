@@ -3,7 +3,7 @@ import { todayISO } from '../lib/format.js'
 import { BUSINESS_TYPES, ENTITIES, FIELD_TYPES, PAGES } from '../lib/presets.js'
 import { roleName } from '../lib/selectors.js'
 import { useStore } from '../lib/store.jsx'
-import { Button, Card, DataTable, Empty, Field, Icon, cls, useConfirm, useForm, useSheets, useToast } from '../ui.jsx'
+import { Button, Card, DataTable, Empty, Field, Icon, Logo, cls, useConfirm, useForm, useSheets, useToast } from '../ui.jsx'
 import { PageHead } from './common.jsx'
 
 const summary = (role) => {
@@ -19,9 +19,34 @@ export default function Settings() {
   const sheets = useSheets()
   const toast = useToast()
   const confirm = useConfirm()
-  const [v, , bind] = useForm(db.company)
+  const [v, , bind] = useForm({ name: db.company.name, tagline: db.company.tagline, phone: db.company.phone, address: db.company.address, invoicePrefix: db.company.invoicePrefix, invoiceNote: db.company.invoiceNote })
   const [err, setErr] = useState('')
   const file = useRef(null)
+  const logoFile = useRef(null)
+
+  /** Shrink the picked image to at most 480px and keep it with the company details, so it prints on invoices. */
+  const pickLogo = (e) => {
+    const f = e.target.files[0]
+    e.target.value = ''
+    if (!f) return
+    if (!f.type.startsWith('image/')) return toast('Choose an image file (PNG, JPG or SVG)')
+    const img = new Image()
+    const url = URL.createObjectURL(f)
+    img.onload = () => {
+      const scale = Math.min(1, 480 / Math.max(img.width, img.height))
+      const c = document.createElement('canvas')
+      c.width = Math.round(img.width * scale)
+      c.height = Math.round(img.height * scale)
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+      URL.revokeObjectURL(url)
+      const data = c.toDataURL('image/png')
+      if (data.length > 400000) return toast('That image is too detailed. Use a simpler logo.')
+      act('saveCompany', { logo: data })
+      toast('Logo saved')
+    }
+    img.onerror = () => toast('That file could not be read as an image')
+    img.src = url
+  }
 
   const backup = () => {
     const url = URL.createObjectURL(new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' }))
@@ -127,6 +152,20 @@ export default function Settings() {
         </div>
 
         <div className="stack">
+          <Card title="Company logo" sub="Shown in the menu and printed at the top of every invoice.">
+            <div className="card-body pt0">
+              <div className="logo-pick">
+                <div className={cls('logo-preview', !db.company.logo && 'empty')}>
+                  {db.company.logo ? <Logo height={72} src={db.company.logo} /> : <span className="t-muted">No logo yet</span>}
+                </div>
+                <div className="btn-row">
+                  <Button variant="secondary" onClick={() => logoFile.current.click()}>{db.company.logo ? 'Change logo' : 'Upload logo'}</Button>
+                  {db.company.logo && <Button variant="ghost" onClick={() => act('saveCompany', { logo: '' })}>Remove</Button>}
+                  <input ref={logoFile} type="file" accept="image/*" hidden onChange={pickLogo} />
+                </div>
+              </div>
+            </div>
+          </Card>
           <Card title="Company details">
             <form className="card-body pt0" noValidate onSubmit={(e) => {
               e.preventDefault()

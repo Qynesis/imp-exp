@@ -34,7 +34,7 @@ async function call(method, path, body, token) {
   }
   const data = await res.json().catch(() => null)
   // a reply that is not from our server (for example the dev proxy failing) means the books server is down
-  if (data === null) throw Object.assign(new Error('The books server is not running. Start it with “npm run dev”, then try again.'), { status: 0 })
+  if (data === null) throw Object.assign(new Error(res.status >= 500 ? `The server failed (${res.status}). Check the deployment logs.` : 'The books server is not running. Start it with “npm run dev”, then try again.'), { status: 0 })
   if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong.'), { status: res.status })
   return data
 }
