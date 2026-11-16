@@ -1,0 +1,14 @@
+/* Printing invoices and reports. */
+/* ---------- printing ---------- */
+.print-root { display: none; }
+@media print {
+  @page { margin: 14mm; }
+  body { background: #fff; }
+  .side, .topbar, .tabbar, .page-actions, .seg-scroll, .sheet-layer, .toast, .day-nav, .month-nav .icon-btn { display: none !important; }
+  .main { margin: 0; padding: 0; }
+  .page > *, .report > * { animation: none !important; }
+  .card { break-inside: avoid; }
+  body:has(.print-root) #root { display: none; }
+  .print-root { display: block; }
+  .print-root .invoice { font-size: 12pt; }
+}

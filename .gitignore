@@ -27,3 +27,7 @@ dist-ssr
 server/data
 .vercel
 .env
+
+# server build output
+dist-server
+*.tsbuildinfo

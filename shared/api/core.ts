@@ -1,0 +1,452 @@
+/**
+ * The books API, independent of where it runs. The same routes back the Node server, the Vercel
+ * function and the browser-only mode; only the storage (KvStore) and the hashing (CryptoKit) differ.
+ *
+ * Keys in the store:
+ *   platform          {salt, hash}                     the platform owner's password
+ *   account:<email>   {tenantId, userId, salt, hash}   one per sign-in
+ *   session:<digest>  {email, exp, platform?, as?}     signed-in tokens (stored hashed)
+ *   tenant:<id>       {name, createdAt}                one per company
+ *   books:<id>        {version, db}                    that company's books
+ */
+import { applyBusinessTypes, isBusinessType } from '../domain/catalog'
+import { isAdmin, OWNER_ROLE_ID } from '../domain/permissions'
+import { demoDb, emptyDb } from '../domain/seed'
+import { isDb, type Db } from '../domain/types'
+import type { CompanySummary, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
+
+/* ---------- ports ---------- */
+export interface Account {
+  tenantId: string
+  userId: string
+  salt: string
+  hash: string
+}
+export interface Session {
+  email: string
+  exp: number
+  platform?: boolean
+  /** The platform owner acting as a company's owner. */
+  as?: { tenantId: string; userId: string }
+}
+export interface TenantBooks {
+  version: number
+  db: Db
+}
+export interface TenantInfo {
+  name: string
+  createdAt: string
+}
+
+export interface KvStore {
+  /** False when the store is not set up; `problem` then says why. */
+  ok: boolean
+  problem?: string
+  kind: string
+  get<T>(key: string): Promise<T | null>
+  set(key: string, value: unknown): Promise<void>
+  del(key: string): Promise<void>
+  list<T>(prefix: string): Promise<{ key: string; value: T }[]>
+  /** Save books only if the stored version is still `expectedVersion`. */
+  cas(key: string, expectedVersion: number, value: TenantBooks): Promise<boolean>
+  audit(line: string): Promise<void>
+  /** Tell the operator a password generated on first start. */
+  generatedPassword(email: string, password: string): Promise<void>
+}
+
+export interface CryptoKit {
+  /** Slow, salted password hash. */
+  hashPassword(password: string, salt: string): Promise<string>
+  /** Fast digest for storing session tokens. */
+  digest(value: string): Promise<string>
+  randomHex(bytes: number): string
+  /** Constant-time comparison. */
+  equal(a: string, b: string): boolean
+}
+
+export interface ApiOptions {
+  platformEmail: string
+  /** When unset, a password is generated once and handed to `store.generatedPassword`. */
+  platformPassword?: string
+  demo: boolean
+  demoPassword: string
+  /** Browser-only mode lists the platform owner among the demo logins. */
+  listPlatformInDemo?: boolean
+  local?: boolean
+}
+
+export interface ApiRequest {
+  method: HttpMethod | string
+  /** Route path without the /api/ prefix, e.g. "books" or "platform/companies". */
+  path: string
+  query: URLSearchParams
+  body: unknown
+  token: string
+  /** For rate limiting sign-in attempts. */
+  client: string
+}
+export interface ApiResponse {
+  status: number
+  body: unknown
+}
+
+export class ApiFailure extends Error {
+  constructor(public status: number, message: string) {
+    super(message)
+  }
+}
+const bad = (message: string) => new ApiFailure(400, message)
+
+/* ---------- helpers ---------- */
+const SESSION_MS = 30 * 86400000
+const PLATFORM_OPEN_MS = 4 * 3600000
+export const DEMO_USERS = [
+  ['u1', 'Demo Owner', 'owner@demo.com', 'owner'],
+  ['u2', 'Demo Accountant', 'accountant@demo.com', 'accountant'],
+  ['u3', 'Demo Sales', 'sales@demo.com', 'sales'],
+  ['u4', 'Demo Warehouse', 'warehouse@demo.com', 'warehouse'],
+] as const
+const DEMO_TENANT = 'demo'
+
+export const cleanEmail = (e: unknown): string => String(e ?? '').trim().toLowerCase()
+const validEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)
+const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v))
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
+const needPassword = (pw: string) => {
+  if (pw.length < 8) throw bad('Use a password of at least 8 characters.')
+}
+
+type Ctx = { token: string; email: string; acc: Account; tenant: TenantBooks }
+type Handler = (req: ApiRequest) => Promise<unknown>
+
+export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
+  const PLATFORM = cleanEmail(opts.platformEmail)
+
+  /* ----- one-time setup: platform password and demo company ----- */
+  let readyPromise: Promise<void> | null = null
+  const ready = () =>
+    (readyPromise ||= setup().catch((e: unknown) => {
+      readyPromise = null
+      throw e
+    }))
+
+  async function setup() {
+    if (!store.ok) return
+    const plat = await store.get<{ salt: string; hash: string }>('platform')
+    if (opts.platformPassword) {
+      if (!plat || !kit.equal(await kit.hashPassword(opts.platformPassword, plat.salt), plat.hash)) {
+        const salt = kit.randomHex(16)
+        await store.set('platform', { salt, hash: await kit.hashPassword(opts.platformPassword, salt) })
+      }
+    } else if (!plat) {
+      const pw = kit.randomHex(9)
+      const salt = kit.randomHex(16)
+      await store.set('platform', { salt, hash: await kit.hashPassword(pw, salt) })
+      await store.generatedPassword(PLATFORM, pw)
+    }
+
+    if (opts.demo) {
+      if (!(await store.get('books:' + DEMO_TENANT))) {
+        const db = demoDb()
+        db.company.name = 'Star Bangla Demo'
+        db.company.logo = '/brand-logo.png'
+        applyBusinessTypes(db, ['general', 'electronics', 'medical'])
+        db.users = DEMO_USERS.map(([id, name, email, roleId]) => ({ id, name, email, roleId, employeeId: '' }))
+        await store.set('books:' + DEMO_TENANT, { version: 1, db } satisfies TenantBooks)
+        await store.set('tenant:' + DEMO_TENANT, { name: db.company.name, createdAt: new Date().toISOString() } satisfies TenantInfo)
+      }
+      for (const [userId, , email] of DEMO_USERS) {
+        const acc = await store.get<Account>('account:' + email)
+        if (acc?.tenantId === DEMO_TENANT && kit.equal(await kit.hashPassword(opts.demoPassword, acc.salt), acc.hash)) continue
+        const salt = kit.randomHex(16)
+        await store.set('account:' + email, { tenantId: DEMO_TENANT, userId, salt, hash: await kit.hashPassword(opts.demoPassword, salt) } satisfies Account)
+      }
+    } else {
+      // demo logins switched off: make sure nobody can still use them
+      for (const [, , email] of DEMO_USERS) {
+        const acc = await store.get<Account>('account:' + email)
+        if (acc?.tenantId === DEMO_TENANT) await store.del('account:' + email)
+      }
+    }
+  }
+
+  /* ----- sessions ----- */
+  const newSession = async (email: string, extra: Partial<Session> = {}) => {
+    const token = kit.randomHex(32)
+    await store.set('session:' + (await kit.digest(token)), { email, exp: Date.now() + SESSION_MS, ...extra } satisfies Session)
+    return token
+  }
+  const dropSessions = async (email: string, keepToken?: string) => {
+    const keep = keepToken ? 'session:' + (await kit.digest(keepToken)) : ''
+    for (const { key, value } of await store.list<Session>('session:')) if (value.email === email && key !== keep) await store.del(key)
+  }
+  const sessionOf = async (token: string) => (token ? store.get<Session>('session:' + (await kit.digest(token))) : null)
+
+  async function auth(req: ApiRequest): Promise<Ctx> {
+    const s = await sessionOf(req.token)
+    if (!s || s.exp < Date.now()) throw new ApiFailure(401, 'Please sign in again.')
+    if (s.platform) throw new ApiFailure(403, 'Open a company first.')
+    const acc = s.as ? ({ ...s.as, salt: '', hash: '' } as Account) : await store.get<Account>('account:' + s.email)
+    if (!acc) throw new ApiFailure(401, 'This account no longer exists.')
+    const tenant = await store.get<TenantBooks>('books:' + acc.tenantId)
+    if (!tenant) throw new ApiFailure(401, 'This company no longer exists.')
+    return { token: req.token, email: s.email, acc, tenant }
+  }
+  async function platformAuth(req: ApiRequest) {
+    const s = await sessionOf(req.token)
+    if (!s || s.exp < Date.now() || !s.platform) throw new ApiFailure(401, 'Please sign in as the platform owner.')
+  }
+  const needAdmin = (ctx: Ctx) => {
+    if (!isAdmin(ctx.tenant.db, ctx.acc.userId)) throw new ApiFailure(403, 'Only an admin can do that.')
+  }
+  const sessionInfo = (ctx: Ctx): SessionInfo => ({ userId: ctx.acc.userId, email: ctx.email, tenantId: ctx.acc.tenantId, viaPlatform: ctx.email === PLATFORM })
+  /** Save books only if nobody saved in between. */
+  const saveBooks = async (ctx: Ctx) => {
+    const base = ctx.tenant.version
+    ctx.tenant.version = base + 1
+    if (!(await store.cas('books:' + ctx.acc.tenantId, base, ctx.tenant))) throw new ApiFailure(409, 'Someone else changed the books.')
+  }
+  const emailTaken = async (email: string) => email === PLATFORM || !!(await store.get('account:' + email))
+
+  // slow down password guessing: 8 failed sign-ins per client and address per 10 minutes
+  const fails = new Map<string, { n: number; until: number }>()
+  const tooMany = (key: string) => {
+    const f = fails.get(key)
+    return !!f && f.until > Date.now() && f.n >= 8
+  }
+  const noteFail = (key: string) => {
+    const f = fails.get(key)
+    if (!f || f.until < Date.now()) fails.set(key, { n: 1, until: Date.now() + 600000 })
+    else f.n++
+  }
+
+  /* ----- routes ----- */
+  const routes: Record<string, Handler> = {
+    'GET status': async (): Promise<StatusResponse> => {
+      const logins: DemoLogin[] = DEMO_USERS.map(([, name, email, roleId]) => ({ name, email, role: roleId[0].toUpperCase() + roleId.slice(1) }))
+      if (opts.listPlatformInDemo) logins.push({ name: 'Platform owner', email: PLATFORM, role: 'Platform owner' })
+      return {
+        ok: store.ok,
+        local: opts.local,
+        problem: store.ok ? null : store.problem,
+        demo: store.ok && opts.demo ? { password: opts.demoPassword, logins } : null,
+      }
+    },
+
+    'POST signup': async (req) => {
+      const b = obj(req.body)
+      const email = cleanEmail(b.email)
+      const company = str(b.company).trim()
+      const name = str(b.name).trim()
+      if (!company) throw bad('Enter your company name.')
+      if (!name) throw bad('Enter your name.')
+      if (!validEmail(email)) throw bad('Enter a valid email address.')
+      needPassword(str(b.password))
+      if (await emailTaken(email)) throw new ApiFailure(409, 'That email already has an account. Sign in instead.')
+      const types = (Array.isArray(b.businessTypes) ? b.businessTypes : []).filter(isBusinessType)
+      const db = b.sample ? demoDb() : emptyDb()
+      db.company.name = company
+      db.users = [{ id: 'u1', name, email, roleId: OWNER_ROLE_ID, employeeId: '' }]
+      applyBusinessTypes(db, types.length ? types : ['general'])
+      const tenantId = kit.randomHex(8)
+      const salt = kit.randomHex(16)
+      await store.set('books:' + tenantId, { version: 1, db } satisfies TenantBooks)
+      await store.set('tenant:' + tenantId, { name: company, createdAt: new Date().toISOString() } satisfies TenantInfo)
+      await store.set('account:' + email, { tenantId, userId: 'u1', salt, hash: await kit.hashPassword(str(b.password), salt) } satisfies Account)
+      return { token: await newSession(email), session: { userId: 'u1', email, tenantId }, db, version: 1 }
+    },
+
+    'POST login': async (req) => {
+      const b = obj(req.body)
+      const email = cleanEmail(b.email)
+      const pw = str(b.password)
+      const key = `${req.client}|${email}`
+      if (tooMany(key)) throw new ApiFailure(429, 'Too many attempts. Wait ten minutes and try again.')
+      if (email === PLATFORM) {
+        const plat = await store.get<{ salt: string; hash: string }>('platform')
+        if (!plat || !kit.equal(await kit.hashPassword(pw, plat.salt), plat.hash)) {
+          noteFail(key)
+          throw new ApiFailure(401, 'Wrong email or password.')
+        }
+        await store.audit(`platform sign-in from ${req.client}`)
+        return { platform: true, token: await newSession(email, { platform: true }) }
+      }
+      const acc = await store.get<Account>('account:' + email)
+      // hash even when the account is unknown so the timing does not reveal which emails exist
+      const hash = await kit.hashPassword(pw, acc?.salt || 'no-such-account')
+      if (!acc || !kit.equal(hash, acc.hash)) {
+        noteFail(key)
+        throw new ApiFailure(401, 'Wrong email or password.')
+      }
+      const tenant = await store.get<TenantBooks>('books:' + acc.tenantId)
+      if (!tenant) throw new ApiFailure(401, 'This company no longer exists.')
+      return { token: await newSession(email), session: { userId: acc.userId, email, tenantId: acc.tenantId }, db: tenant.db, version: tenant.version }
+    },
+
+    'POST logout': async (req) => {
+      if (req.token) await store.del('session:' + (await kit.digest(req.token)))
+      return { ok: true }
+    },
+
+    'GET books': async (req) => {
+      const ctx = await auth(req)
+      if (Number(req.query.get('v')) === ctx.tenant.version) return { same: true, version: ctx.tenant.version }
+      return { session: sessionInfo(ctx), db: ctx.tenant.db, version: ctx.tenant.version }
+    },
+
+    'PUT books': async (req) => {
+      const ctx = await auth(req)
+      const { db: cur, version } = ctx.tenant
+      const b = obj(req.body)
+      const next = b.db
+      if (!isDb(next)) throw bad('Those are not valid books.')
+      if (b.baseVersion !== version) throw new ApiFailure(409, 'Someone else changed the books.')
+      const uid = ctx.acc.userId
+      const me = cur.users.find((u) => u.id === uid)
+      const myRole = me && cur.roles.find((r) => r.id === me.roleId)
+      if (!myRole) throw new ApiFailure(403, 'Your role was removed.')
+      const admin = isAdmin(cur, uid)
+      if (!admin && !Object.values(myRole.perms).includes('edit')) throw new ApiFailure(403, 'Your role is view-only.')
+      next.users = cur.users // users only change through the users routes
+      if (!admin) {
+        // only an admin may change roles, company details and custom fields
+        next.roles = cur.roles
+        next.company = cur.company
+        next.fieldDefs = cur.fieldDefs
+        next.businessTypes = cur.businessTypes
+      } else if (!next.roles?.some((r) => r.id === OWNER_ROLE_ID)) throw bad('The Owner role cannot be removed.')
+      ctx.tenant.db = next
+      await saveBooks(ctx)
+      return { version: ctx.tenant.version }
+    },
+
+    'POST users': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const b = obj(req.body)
+      const email = cleanEmail(b.email)
+      const name = str(b.name).trim()
+      const roleId = str(b.roleId)
+      const { db } = ctx.tenant
+      if (!name) throw bad('Enter the user’s name.')
+      if (!validEmail(email)) throw bad('Enter a valid email address.')
+      needPassword(str(b.password))
+      if (!db.roles.some((r) => r.id === roleId)) throw bad('Choose a role.')
+      if (await emailTaken(email)) throw new ApiFailure(409, 'That email already has an account.')
+      const id = 'u' + ++db.seq.id
+      db.users.push({ id, name, email, roleId, employeeId: str(b.employeeId) })
+      await saveBooks(ctx)
+      const salt = kit.randomHex(16)
+      await store.set('account:' + email, { tenantId: ctx.acc.tenantId, userId: id, salt, hash: await kit.hashPassword(str(b.password), salt) } satisfies Account)
+      return { db, version: ctx.tenant.version }
+    },
+
+    'PATCH users': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const b = obj(req.body)
+      const { db } = ctx.tenant
+      const user = db.users.find((u) => u.id === b.id)
+      if (!user) throw bad('No such user.')
+      const roleId = str(b.roleId)
+      if (roleId) {
+        if (!db.roles.some((r) => r.id === roleId)) throw bad('Choose a role.')
+        if (user.roleId === OWNER_ROLE_ID && roleId !== OWNER_ROLE_ID && db.users.filter((u) => u.roleId === OWNER_ROLE_ID).length === 1) throw bad('There must be at least one Owner.')
+        user.roleId = roleId
+      }
+      const pw = str(b.password)
+      if (pw) {
+        needPassword(pw)
+        const acc = await store.get<Account>('account:' + user.email)
+        if (acc) {
+          acc.salt = kit.randomHex(16)
+          acc.hash = await kit.hashPassword(pw, acc.salt)
+          await store.set('account:' + user.email, acc)
+          await dropSessions(user.email, ctx.token)
+        }
+      }
+      await saveBooks(ctx)
+      return { db, version: ctx.tenant.version }
+    },
+
+    'DELETE users': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const id = req.query.get('id')
+      const { db } = ctx.tenant
+      const user = db.users.find((u) => u.id === id)
+      if (!user) throw bad('No such user.')
+      if (id === ctx.acc.userId) throw bad('You cannot remove yourself.')
+      if (user.roleId === OWNER_ROLE_ID && db.users.filter((u) => u.roleId === OWNER_ROLE_ID).length === 1) throw bad('There must be at least one Owner.')
+      db.users = db.users.filter((u) => u.id !== id)
+      await saveBooks(ctx)
+      await store.del('account:' + user.email)
+      await dropSessions(user.email)
+      return { db, version: ctx.tenant.version }
+    },
+
+    'GET platform/companies': async (req) => {
+      await platformAuth(req)
+      const companies: CompanySummary[] = []
+      for (const { key, value: t } of await store.list<TenantInfo>('tenant:')) {
+        const id = key.slice('tenant:'.length)
+        const db = (await store.get<TenantBooks>('books:' + id))?.db
+        companies.push({
+          id, name: db?.company.name || t.name, createdAt: t.createdAt, trades: db?.businessTypes || [],
+          counts: { products: db?.products.length || 0, invoices: db?.invoices.length || 0, shipments: db?.imports.length || 0 },
+          users: (db?.users || []).map((u) => ({ id: u.id, name: u.name, email: u.email, role: db?.roles.find((r) => r.id === u.roleId)?.name || 'No role' })),
+        })
+      }
+      return { companies: companies.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)) }
+    },
+
+    /** Open a company's books as its owner. Every use is written to the audit log. */
+    'POST platform/open': async (req) => {
+      await platformAuth(req)
+      const tenantId = str(obj(req.body).tenantId)
+      const tenant = await store.get<TenantBooks>('books:' + tenantId)
+      if (!tenant) throw bad('No such company.')
+      const owner = tenant.db.users.find((u) => u.roleId === OWNER_ROLE_ID)
+      if (!owner) throw bad('That company has no owner.')
+      await store.audit(`platform opened company ${tenantId} (${tenant.db.company.name}) as ${owner.email}`)
+      const token = await newSession(PLATFORM, { as: { tenantId, userId: owner.id }, exp: Date.now() + PLATFORM_OPEN_MS })
+      return { token, session: { userId: owner.id, email: owner.email, tenantId, viaPlatform: true }, db: tenant.db, version: tenant.version }
+    },
+
+    'POST platform/password': async (req) => {
+      await platformAuth(req)
+      const b = obj(req.body)
+      const email = cleanEmail(b.email)
+      const acc = await store.get<Account>('account:' + email)
+      if (!acc) throw bad('No such user.')
+      needPassword(str(b.password))
+      acc.salt = kit.randomHex(16)
+      acc.hash = await kit.hashPassword(str(b.password), acc.salt)
+      await store.set('account:' + email, acc)
+      await dropSessions(email)
+      await store.audit(`platform reset password for ${email}`)
+      return { ok: true }
+    },
+  }
+
+  /** Run one request. Never throws: failures come back as an error status with a message. */
+  async function handle(req: ApiRequest): Promise<ApiResponse> {
+    const handler = routes[`${req.method} ${req.path.replace(/^\/+|\/+$/g, '')}`]
+    if (!handler) return { status: 404, body: { error: 'Not found.' } }
+    try {
+      if (req.path !== 'status') {
+        if (!store.ok) throw new ApiFailure(503, store.problem || 'The data store is not set up.')
+        await ready()
+      } else await ready().catch(() => undefined)
+      return { status: 200, body: await handler(req) }
+    } catch (e) {
+      if (e instanceof ApiFailure) return { status: e.status, body: { error: e.message } }
+      console.error(e)
+      return { status: 500, body: { error: 'Something went wrong on the server.' } }
+    }
+  }
+
+  return { handle, ready, platformEmail: PLATFORM }
+}
+
+export type BooksApi = ReturnType<typeof createApi>
