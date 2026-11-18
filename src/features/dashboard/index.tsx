@@ -11,7 +11,7 @@ import { useBooks } from '@/core/store/context'
 import { DealerStatementSheet } from '@/features/dealers/sheets/DealerStatementSheet'
 import { NewFactoryOrderSheet } from '@/features/factory-orders/sheets/NewFactoryOrderSheet'
 import { NewShipmentSheet } from '@/features/shipments/sheets/NewShipmentSheet'
-import { TripSheet } from '@/features/transport/sheets/TripSheet'
+import { DeliverSheet } from '@/features/deliveries/sheets/DeliverSheet'
 import { Button, Card, cls, Empty, Icon, IconBadge, Pill, Progress, Stat, useSheets } from '@/ui'
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
@@ -87,18 +87,18 @@ export default function DashboardPage() {
 
       <h2 className="dash-h"><Icon name="receipt" size={20} />Orders, money and stock</h2>
       <div className="grid2">
-        {book.toDeliver.length > 0 && can('transport') && (
-          <Card icon="truck" title="Orders waiting for delivery" sub={`Invoices of the last two weeks with no trip booked${book.onTheRoad ? ` · ${book.onTheRoad} on the road now` : ''}`}
-            action={<a className="link" href={href('transport')}>Transport</a>}>
+        {book.toDeliver.length > 0 && can('deliveries') && (
+          <Card icon="truck" title="Orders waiting for delivery" sub={`Billed, goods not all gone yet${book.onTheRoad ? ` · ${book.onTheRoad} trips on the road now` : ''}`}
+            action={<a className="link" href={href('deliveries')}>Delivery</a>}>
             <div className="rows">
               {book.toDeliver.slice(0, 6).map((i) => (
                 <div key={i.id} className="row-wrap">
                   <div className="row">
                     <span className="name">{byId(db.dealers, i.dealerId)?.name}</span>
-                    <span className="meta">{i.id} · {fshort(i.date)}</span>
+                    <span className="meta">{i.id} · {fshort(i.date)} · {fmt(i.units)} units{i.partial ? ' left' : ''}</span>
                     <span className="amt">{tkShort(i.total)}</span>
                   </div>
-                  <Button size="sm" variant="secondary" icon="truck" className="edit-only" onClick={() => sheets.open(TripSheet, { purpose: 'delivery', dealerId: i.dealerId, invoiceId: i.id })}>Deliver</Button>
+                  <Button size="sm" variant="secondary" icon="check" className="edit-only" onClick={() => sheets.open(DeliverSheet, { invoiceId: i.id })}>Deliver</Button>
                 </div>
               ))}
               {book.toDeliver.length > 6 && <div className="row foot-note">and {book.toDeliver.length - 6} more</div>}

@@ -18,8 +18,10 @@ export interface CourierKeys {
   storeId?: string
   /** Override the courier's API address, e.g. its sandbox. */
   baseUrl?: string
+  /** Test mode: simulate the courier instead of calling it. */
+  test?: boolean
 }
-export type KeyName = Exclude<keyof CourierKeys, 'provider'>
+export type KeyName = Exclude<keyof CourierKeys, 'provider' | 'test'>
 
 export interface BookRequest {
   /** Our reference, normally the invoice number. Couriers reject a repeat. */
@@ -281,6 +283,85 @@ const redx: Adapter = {
 
 const ADAPTERS: Partial<Record<CourierProvider, Adapter>> = { steadfast, pathao, redx, demo }
 
+/* ---------- test mode: each courier simulated, no keys and no network ---------- */
+
+/** Each courier's own status words, in the order a parcel moves through them. */
+export const SIM_STEPS: Partial<Record<CourierProvider, string[]>> = {
+  steadfast: ['in_review', 'pending', 'in_transit', 'delivered'],
+  pathao: ['pickup_requested', 'picked', 'in_transit_to_delivery_hub', 'assigned_for_delivery', 'delivered'],
+  redx: ['pickup-pending', 'ready-for-delivery', 'delivery-in-progress', 'delivered'],
+}
+/** Minutes after booking at which a simulated parcel reaches each step. */
+const SIM_AT = [0, 2, 10, 30, 60]
+
+/** A consignment id in the courier's own style, carrying the booking time so status can follow from it. */
+export function simConsignment(p: CourierProvider, at: number): { id: string; tracking: string } {
+  const t = at.toString(36).toUpperCase()
+  if (p === 'steadfast') return { id: String(at).slice(-9), tracking: t.slice(-8) }
+  if (p === 'pathao') return { id: `DT${t}`, tracking: `DT${t}` }
+  if (p === 'redx') return { id: `21A${t}`, tracking: `21A${t}` }
+  return { id: `DEMO-${t}`, tracking: `DM${t}` }
+}
+function simBookedAt(p: CourierProvider, id: string): number {
+  if (p === 'steadfast') return Number(id) || 0
+  const n = parseInt(id.replace(/^(DT|21A|DEMO-)/, ''), 36)
+  return Number.isFinite(n) ? n : 0
+}
+/** Where a simulated parcel booked at `at` is now. Steadfast ids keep only the last 9 digits, so they are re-anchored to now. */
+export function simStatus(p: CourierProvider, id: string, now = Date.now()): string {
+  const steps = SIM_STEPS[p] || ['in_review', 'in_transit', 'delivered']
+  let at = simBookedAt(p, id)
+  if (p === 'steadfast') at = now - ((now % 1e9) - at + 1e9) % 1e9
+  const mins = (now - at) / 60000
+  let i = 0
+  SIM_AT.forEach((m, k) => mins >= m && (i = k))
+  return steps[Math.min(i, steps.length - 1)]
+}
+
+const SIM_CITIES: Area[] = [{ id: '1', name: 'Dhaka' }, { id: '2', name: 'Chattogram' }, { id: '3', name: 'Sylhet' }, { id: '4', name: 'Khulna' }]
+const SIM_ZONES: Record<string, Area[]> = {
+  '1': [{ id: '101', name: 'Mirpur' }, { id: '102', name: 'Dhanmondi' }, { id: '103', name: 'Uttara' }, { id: '104', name: 'Motijheel' }],
+  '2': [{ id: '201', name: 'Agrabad' }, { id: '202', name: 'Halishahar' }, { id: '203', name: 'Chawkbazar' }, { id: '204', name: 'Hathazari' }, { id: '205', name: 'Patiya' }],
+  '3': [{ id: '301', name: 'Zindabazar' }, { id: '302', name: 'Amberkhana' }],
+  '4': [{ id: '401', name: 'Sonadanga' }, { id: '402', name: 'Khalishpur' }],
+}
+const SIM_AREAS: Area[] = Object.entries(SIM_ZONES).flatMap(([c, zs]) => zs.map((z) => ({ id: z.id, name: `${z.name}, ${SIM_CITIES.find((x) => x.id === c)?.name}` })))
+
+function simulated(p: CourierProvider): Adapter {
+  const real = ADAPTERS[p]
+  const label = `${real?.label || p} (test mode)`
+  const trackUrl = (code: string) => (p === 'steadfast' ? `https://steadfast.com.bd/t/${code}` : p === 'pathao' ? `https://merchant.pathao.com/tracking?consignment_id=${code}` : p === 'redx' ? `https://redx.com.bd/track-parcel/?trackingId=${code}` : '')
+  return {
+    label,
+    areas: real?.areas,
+    async book(_k, req) {
+      if (p === 'pathao' && (!req.cityId || !req.zoneId)) throw new CourierError('Pick the city and zone for Pathao.')
+      if (p === 'redx' && !req.areaId) throw new CourierError('Pick the RedX delivery area.')
+      const c = simConsignment(p, Date.now())
+      const charge = p === 'redx' ? 70 : p === 'pathao' ? (req.cityId === '1' ? 60 : 110) : 60 + Math.max(Math.ceil((req.weight || 1) - 1), 0) * 15
+      return { consignmentId: c.id, trackingCode: c.tracking, trackingUrl: trackUrl(c.tracking), status: (SIM_STEPS[p] || ['in_review'])[0], charge }
+    },
+    async status(_k, id) {
+      return simStatus(p, id)
+    },
+    async track(_k, code) {
+      const steps = SIM_STEPS[p] || ['in_review', 'in_transit', 'delivered']
+      const now = simStatus(p, code)
+      const reached = steps.slice(0, steps.indexOf(now) + 1)
+      return { status: now, trackingUrl: trackUrl(code), events: reached.map((s, i) => ({ time: new Date(Date.now() - (reached.length - i) * 600000).toISOString(), text: PARCEL_STATUS[s] || s })).reverse() }
+    },
+    async listAreas(_k, parentId) {
+      return p === 'pathao' ? (parentId ? SIM_ZONES[parentId] || [] : SIM_CITIES) : p === 'redx' ? SIM_AREAS : []
+    },
+    async balance() {
+      return 12450
+    },
+    async test() {
+      return `Test mode: ${real?.label || p} is simulated, no keys needed. Balance Tk 12,450 (pretend).`
+    },
+  }
+}
+
 /** The credentials each courier asks for, in the order the settings form shows them. */
 export const FIELDS: Record<CourierProvider, { key: KeyName; label: string; secret?: boolean; hint?: string }[]> = {
   steadfast: [
@@ -324,7 +405,9 @@ export const PARCEL_STATUS: Record<string, string> = {
   in_transit_to_delivery_hub: 'In transit', received_at_last_mile_hub: 'At delivery hub', assigned_for_delivery: 'Out for delivery', return: 'Returned', paid_return: 'Returned',
 }
 
-function adapter(p: CourierProvider): Adapter {
+/** Test mode swaps every courier for its simulation; the demo courier is always simulated. */
+function adapter(p: CourierProvider, test = false): Adapter {
+  if (test && p !== 'manual') return simulated(p)
   const a = ADAPTERS[p]
   if (!a) throw new CourierError('This courier has no automatic booking. Record the consignment by hand.')
   return a
@@ -343,35 +426,36 @@ async function guarded<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 function ready(keys: CourierKeys) {
+  if (keys.test) return
   const missing = FIELDS[keys.provider].filter((f) => f.key !== 'baseUrl' && !keys[f.key])
   if (missing.length) throw new CourierError(`${courierLabel(keys.provider)} is not set up: add ${missing.map((m) => m.label.toLowerCase()).join(', ')} under Courier, Couriers.`)
 }
 
-export const bookParcel = (k: CourierKeys, req: BookRequest, http: Fetch = fetch) => guarded(() => (ready(k), adapter(k.provider).book(k, req, http)))
-export const parcelStatus = (k: CourierKeys, id: string, http: Fetch = fetch) => guarded(() => (ready(k), adapter(k.provider).status(k, id, http)))
+export const bookParcel = (k: CourierKeys, req: BookRequest, http: Fetch = fetch) => guarded(() => (ready(k), adapter(k.provider, k.test).book(k, req, http)))
+export const parcelStatus = (k: CourierKeys, id: string, http: Fetch = fetch) => guarded(() => (ready(k), adapter(k.provider, k.test).status(k, id, http)))
 export const trackParcel = (k: CourierKeys, code: string, http: Fetch = fetch) =>
   guarded(async () => {
     ready(k)
-    const a = adapter(k.provider)
+    const a = adapter(k.provider, k.test)
     if (!a.track) throw new CourierError(`${a.label} has no tracking lookup.`)
     return a.track(k, code, http)
   })
 export const courierAreas = (k: CourierKeys, parentId: string, http: Fetch = fetch) =>
   guarded(async () => {
     ready(k)
-    const a = adapter(k.provider)
+    const a = adapter(k.provider, k.test)
     return a.listAreas ? a.listAreas(k, parentId, http) : []
   })
 export const courierBalance = (k: CourierKeys, http: Fetch = fetch) =>
   guarded(async () => {
     ready(k)
-    const a = adapter(k.provider)
+    const a = adapter(k.provider, k.test)
     if (!a.balance) throw new CourierError(`${a.label} does not report a balance.`)
     return a.balance(k, http)
   })
 export const testCourier = (k: CourierKeys, http: Fetch = fetch) =>
   guarded(async () => {
     ready(k)
-    const a = adapter(k.provider)
+    const a = adapter(k.provider, k.test)
     return a.test ? a.test(k, http) : 'Saved.'
   })

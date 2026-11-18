@@ -27,6 +27,7 @@ export const productInUse = (db: Db, id: string): boolean =>
   db.factoryOrders.some((o) => o.productId === id || (o.materials || []).some((m) => m.productId === id)) ||
   db.imports.some((s) => s.productId === id) ||
   db.invoices.some((i) => i.lines.some((l) => l.productId === id)) ||
+  (db.quotes || []).some((q) => q.lines.some((l) => l.productId === id)) ||
   (db.adjustments || []).some((a) => a.productId === id) ||
   (db.productions || []).some((m) => m.productId === id || m.materials.some((g) => g.productId === id)) ||
   db.products.some((p) => p.id !== id && (p.recipe || []).some((r) => r.productId === id))
@@ -166,9 +167,19 @@ export const stockHistory = (db: Db, productId: string): { moves: StockMove[]; o
       else add(s.id, s.steps.warehouse?.date, s.ts, `Import from ${s.country || 'abroad'} reached the warehouse`, s.lcNo || s.id, s.qty)
     }
     for (const inv of db.invoices) {
-      if (inv.status !== 'final') continue
+      // invoices that wait for delivery move stock when the goods go, below
+      if (inv.status !== 'final' || inv.stockOnDelivery) continue
       const qty = sum(inv.lines.filter((l) => l.productId === productId), (l) => l.qty)
       add(inv.id, inv.date, inv.ts, `Sold to ${byId(db.dealers, inv.dealerId)?.name || 'dealer'}`, inv.id, -qty)
+    }
+    for (const dv of db.deliveries || []) {
+      const qty = sum(dv.lines.filter((l) => l.productId === productId), (l) => l.qty)
+      add(dv.id, dv.date, dv.ts, `Delivered to ${byId(db.dealers, dv.dealerId)?.name || 'dealer'}`, dv.invoiceId, -qty)
+    }
+    for (const r of db.returns || []) {
+      if (r.condition !== 'restock') continue
+      const qty = sum(r.lines.filter((l) => l.productId === productId), (l) => l.qty)
+      add(r.id, r.date, r.ts, `Returned by ${byId(db.dealers, r.dealerId)?.name || 'dealer'}`, [r.invoiceId, r.reason].filter(Boolean).join(' · '), qty)
     }
     for (const a of db.adjustments || []) if (a.productId === productId) add(a.id, a.date, a.ts, `Adjusted · ${a.reason}`, a.note, a.qty)
     for (const m of db.productions || []) {

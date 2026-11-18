@@ -6,6 +6,7 @@ import { addDays, daysBetween, todayISO } from '../format'
 import type { Db, ISODate, Shipment } from '../types'
 import { memo, sum } from './common'
 import { customsCalc } from './customs'
+import { pendingDeliveries } from './delivery'
 import { totalsBetween } from './sales'
 import { shipmentCalc, stepLabel } from './shipments'
 import { trips } from './transport'
@@ -86,8 +87,8 @@ export interface OrderBook {
   yesterday: { orders: number; value: number }
   month: { orders: number; value: number; profit: number }
   target: number
-  /** Final invoices of the last two weeks with no delivery trip booked. */
-  toDeliver: { id: string; dealerId: string; date: ISODate; total: number }[]
+  /** Bills with goods still to deliver, oldest first. */
+  toDeliver: { id: string; dealerId: string; date: ISODate; total: number; units: number; partial: boolean }[]
   onTheRoad: number
 }
 
@@ -100,13 +101,8 @@ export const orderBook = (db: Db): OrderBook =>
       const x = totalsBetween(db, d, d)
       return { orders: x.invoices, value: x.sales }
     }
-    const booked = new Set(trips(db).filter((x) => x.status !== 'cancelled').map((x) => x.invoiceId).filter(Boolean))
-    // only worth asking once the company records deliveries at all
-    const tracksDelivery = trips(db).some((x) => x.invoiceId)
-    const since = addDays(t, -14)
-    const toDeliver = tracksDelivery
-      ? db.invoices.filter((i) => i.status === 'final' && i.date >= since && !booked.has(i.id)).map((i) => ({ id: i.id, dealerId: i.dealerId, date: i.date, total: sum(i.lines, (l) => l.qty * l.price) - (i.discount || 0) })).reverse()
-      : []
+    // bills whose goods have not all gone yet, from the delivery section
+    const toDeliver = pendingDeliveries(db).map((x) => ({ id: x.inv.id, dealerId: x.inv.dealerId, date: x.inv.date, total: sum(x.inv.lines, (l) => l.qty * l.price) - (x.inv.discount || 0), units: x.d.remainingUnits, partial: x.d.status === 'partial' }))
     return {
       today: day(t), yesterday: day(y), month: { orders: m.invoices, value: m.sales, profit: m.profit }, target: db.company.salesTarget || 0,
       toDeliver, onTheRoad: trips(db).filter((x) => x.status === 'on-the-way').length,

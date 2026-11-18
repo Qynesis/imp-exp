@@ -30,6 +30,10 @@ export const apiOptions = (): ApiOptions => ({
     pathao: { apiKey: env('PATHAO_CLIENT_ID'), secretKey: env('PATHAO_CLIENT_SECRET'), username: env('PATHAO_USERNAME'), password: env('PATHAO_PASSWORD'), storeId: env('PATHAO_STORE_ID'), baseUrl: env('PATHAO_BASE_URL') },
     redx: { apiKey: env('REDX_TOKEN'), baseUrl: env('REDX_BASE_URL') },
   },
+  messaging: {
+    whatsapp: { token: env('WHATSAPP_TOKEN'), phoneNumberId: env('WHATSAPP_PHONE_NUMBER_ID'), template: env('WHATSAPP_TEMPLATE'), language: env('WHATSAPP_TEMPLATE_LANGUAGE') },
+    sms: { apiKey: env('SMS_API_KEY'), senderId: env('SMS_SENDER_ID'), gateway: env('SMS_GATEWAY') },
+  },
 })
 
 /** Postgres when DATABASE_URL is set; files on disk otherwise (or a clear error where there is no disk). */

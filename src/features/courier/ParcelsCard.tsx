@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { byId, fshort, tk, type CourierProvider } from '@shared/domain'
+import { byId, fshort, tk, todayISO, type CourierProvider } from '@shared/domain'
 import { courierLabel } from '@shared/courier'
 import { PhoneLink } from '@/components/PhoneLink'
 import { useBooks } from '@/core/store/context'
@@ -13,7 +13,7 @@ type Show = 'open' | 'done' | 'all'
 
 /** Every courier parcel, filtered by state and courier, with a button to fetch the latest status of those still out. */
 export function ParcelsCard() {
-  const { db } = useBooks()
+  const { db, act } = useBooks()
   const sheets = useSheets()
   const toast = useToast()
   const { refresh } = useCourier()
@@ -61,10 +61,18 @@ export function ParcelsCard() {
           <input className="in search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Consignment, invoice, name or phone" aria-label="Search parcels" />
         </div>
       </div>
+      {!all.length && (
+        <div className="card-body pt0">
+          <div className="next-step">
+            <span>No parcels yet. Load sample parcels to see how booking, tracking and cash collection look.</span>
+            <Button size="sm" icon="parcel" className="edit-only" onClick={() => { act('loadSampleParcels', { today: todayISO() }); toast('Sample parcels loaded, test mode on') }}>Load sample parcels</Button>
+          </div>
+        </div>
+      )}
       <DataTable pageSize={25} rows={rows} rowKey={(p) => p.id} onRow={(p) => sheets.open(ParcelDetailSheet, { parcelId: p.id })}
         empty={all.length ? 'No parcels here.' : 'No parcels yet. Use Book a parcel, or Book courier on an invoice.'}
         columns={[
-          { label: 'Parcel', primary: true, render: (p) => <span className="two-line"><b>{p.consignmentId}</b><small>{courierLabel(p.provider).split(' (')[0]} · {fshort(p.date)}{p.invoiceId || p.reference ? ` · ${p.invoiceId || p.reference}` : ''}</small></span> },
+          { label: 'Parcel', primary: true, render: (p) => <span className="two-line"><b>{p.consignmentId}{p.test && <span className="test-tag">test</span>}</b><small>{courierLabel(p.provider).split(' (')[0]} · {fshort(p.date)}{p.invoiceId || p.reference ? ` · ${p.invoiceId || p.reference}` : ''}</small></span> },
           { label: 'To', render: (p) => <span className="two-line"><span>{byId(db.dealers, p.dealerId)?.name || p.recipientName}</span><small><PhoneLink phone={p.phone} label={p.recipientName} /></small></span> },
           { label: 'Address', render: (p) => <span className="t-muted">{p.address}{p.areaName ? ` · ${p.areaName}` : ''}</span> },
           { label: 'Cash to collect', align: 'right', render: (p) => (p.cod ? tk(p.cod) : <span className="t-muted">None</span>) },

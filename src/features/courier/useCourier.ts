@@ -37,7 +37,7 @@ export function useCourier() {
     act('saveParcel', {
       date: todayISO(), invoiceId: opts.invoice?.id || '', dealerId: opts.invoice?.dealerId || '', provider: p, consignmentId: r.consignmentId, trackingCode: r.trackingCode,
       trackingUrl: r.trackingUrl, status: r.status, cod: req.cod, recipientName: req.name, phone: req.phone, address: req.address, note: req.note,
-      weight: req.weight, areaName: req.areaName, charge: r.charge, reference: req.invoice, history: [{ date: todayISO(), status: r.status }],
+      weight: req.weight, areaName: req.areaName, charge: r.charge, reference: req.invoice, test: db.company.courier?.testMode || undefined, history: [{ date: todayISO(), status: r.status }],
     })
     return r.consignmentId
   }
@@ -45,12 +45,12 @@ export function useCourier() {
   async function refresh(parcelId: string): Promise<string> {
     const p = byId(db.parcels || [], parcelId)
     if (!p || p.provider === 'manual') return p?.status || ''
-    const r = await call<{ status: string }>('POST', 'courier/status', { consignmentId: p.consignmentId, provider: p.provider })
+    const r = await call<{ status: string }>('POST', 'courier/status', { consignmentId: p.consignmentId, provider: p.provider, test: p.test })
     act('setParcelStatus', { id: p.id, status: r.status, date: todayISO() })
     return r.status
   }
 
-  const track = (p: CourierProvider, code: string) => call<TrackResult>('POST', 'courier/track', { provider: p, code })
+  const track = (p: CourierProvider, code: string, test?: boolean) => call<TrackResult>('POST', 'courier/track', { provider: p, code, test })
   const areas = (p: CourierProvider, parentId = '') => call<{ areas: Area[] }>('POST', 'courier/areas', { provider: p, parentId }).then((r) => r.areas)
 
   return { provider, book, refresh, track, areas }

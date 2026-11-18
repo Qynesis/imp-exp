@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react'
-import { byId, dealerLedger, fdate, fmt, invoiceDue, invTotal, newestFirst, num, tk, todayISO, type Db, type DealerTerms, type Invoice, type InvoiceData } from '@shared/domain'
+import { addDays, availableQty, byId, dealerLedger, fdate, fmt, invoiceDue, invTotal, newestFirst, num, reservedQty, tk, todayISO, type Db, type DealerTerms, type Invoice, type InvoiceData, type SalesQuote } from '@shared/domain'
 import type { FeatureRouteProps } from '@/app/features'
 import { PageHead } from '@/components/PageHead'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, Icon, Segmented, useConfirm, usePrint, useSheets, useToast } from '@/ui'
+import { Button, Card, DataTable, Field, Icon, Pill, Segmented, useConfirm, usePrint, useSheets, useToast } from '@/ui'
 import { parcelDefaults, useCourier } from '@/features/courier/useCourier'
 import { InvoiceDoc } from './InvoiceDoc'
 import { InvoiceStatus } from './InvoiceStatus'
 import { InvoiceLineSheet } from './sheets/InvoiceLineSheet'
+import { useMessaging, vars } from '@/features/messages/useMessaging'
+import { QUOTE_TEXT, QUOTE_TONE } from './quoteStatus'
+import { QuoteSheet } from './sheets/QuoteSheet'
 import { ViewInvoiceSheet } from './sheets/ViewInvoiceSheet'
 
 interface LineDraft {
@@ -25,6 +28,10 @@ interface Draft {
   discount: string
   received: string
   method: string
+  /** Billing or editing this dealer estimate. */
+  quoteId?: string
+  validUntil?: string
+  note?: string
 }
 
 const blank = (db: Db, dealerId?: string): Draft => {
@@ -37,7 +44,12 @@ const fromInvoice = (inv: Invoice): Draft => ({
   discount: String(inv.discount || ''), received: String(inv.received || ''),
 })
 
-/** #/sell, and #/sell/new/<dealer id> to start an invoice for one dealer. */
+const fromQuote = (q: SalesQuote): Draft => ({
+  draftId: '', dealerId: q.dealerId, soldBy: q.soldBy, date: todayISO(), terms: q.terms, method: 'Cash', quoteId: q.id, validUntil: q.validUntil, note: q.note,
+  lines: q.lines.map((l) => ({ productId: l.productId, qty: String(l.qty), price: String(l.price) })), discount: String(q.discount || ''), received: '',
+})
+
+/** #/sell, #/sell/new/<dealer id> to start an invoice for one dealer, #/sell/quote/<estimate id> to bill an estimate. */
 export default function SellPage({ params }: FeatureRouteProps) {
   const { db, act } = useBooks()
   const courier = useCourier()
@@ -45,7 +57,12 @@ export default function SellPage({ params }: FeatureRouteProps) {
   const toast = useToast()
   const confirm = useConfirm()
   const print = usePrint()
-  const [f, setF] = useState<Draft>(() => blank(db, params[0] === 'new' ? params[1] : undefined))
+  const msg = useMessaging()
+  const [f, setF] = useState<Draft>(() => {
+    const q = params[0] === 'quote' ? byId(db.quotes || [], params[1]) : undefined
+    return q && q.status !== 'invoiced' ? fromQuote(q) : blank(db, params[0] === 'new' ? params[1] : undefined)
+  })
+  const [deliverNow, setDeliverNow] = useState(false)
   const [err, setErr] = useState('')
   const set = (patch: Partial<Draft>) => {
     setF((s) => ({ ...s, ...patch }))
@@ -82,12 +99,26 @@ export default function SellPage({ params }: FeatureRouteProps) {
       const p = byId(db.products, l.productId)
       if (!p) return 'One of the products no longer exists. Remove it from the invoice.'
       if (l.qty <= 0 || l.price <= 0) return `Enter a quantity and price for ${p.name}.`
-      if (final && l.qty > p.stock) return `Only ${fmt(p.stock)} ${p.unit} of ${p.name} in the warehouse.`
+      // stock already billed to others is spoken for until it is delivered
+      if (final && l.qty > availableQty(db, p)) return `Only ${fmt(Math.max(availableQty(db, p), 0))} ${p.unit} of ${p.name} is free to sell (${fmt(p.stock)} in the warehouse, ${fmt(reservedQty(db, p.id))} waiting for delivery).`
     }
     if (data.discount < 0 || total <= 0) return 'The discount cannot be more than the subtotal.'
     if (data.received < 0 || data.received > total) return 'Received now cannot be more than the invoice total.'
     if (final && f.terms === 'credit' && dealer.terms === 'cod' && due > 0) return `${dealer.name} is cash on delivery only. Take the full amount or change the dealer’s terms.`
     return ''
+  }
+
+  /** Keep this as an estimate for the dealer to approve; nothing is billed or taken from stock. */
+  const saveEstimate = () => {
+    const problem = check(false)
+    if (problem) return setErr(problem)
+    const lines = data.lines.map((l) => ({ ...l, name: byId(db.products, l.productId)?.name, unit: byId(db.products, l.productId)?.unit }))
+    const id = f.quoteId || 'QT-' + (db.seq.qt ?? 101)
+    act('saveQuote', { id: f.quoteId, date: f.date, dealerId: f.dealerId, soldBy: f.soldBy, terms: f.terms, lines, discount: data.discount, validUntil: f.validUntil || addDays(f.date, 7), note: f.note || '' })
+    toast(`Estimate ${id} saved. Send it from Estimates below.`)
+    const q = { id, ts: 0, date: f.date, dealerId: f.dealerId, soldBy: f.soldBy, terms: f.terms, lines, discount: data.discount, validUntil: f.validUntil || addDays(f.date, 7), note: f.note || '', status: 'draft' as const }
+    void msg.auto('estimate', f.dealerId, vars.quote(db, q), id)
+    setF(blank(db, f.dealerId))
   }
 
   const saveDraft = () => {
@@ -108,8 +139,11 @@ export default function SellPage({ params }: FeatureRouteProps) {
       })
       if (!ok) return
     }
-    act('saveInvoice', { id: f.draftId, data, final: true })
-    toast(`Invoice ${nextId} saved`)
+    act('saveInvoice', { id: f.draftId, data, final: true, deliverNow, quoteId: f.quoteId })
+    toast(deliverNow ? `Invoice ${nextId} saved and delivered` : `Invoice ${nextId} saved · waiting in Delivery`)
+    // the bill message, when set to go by itself; the new bill's due is not in the ledger yet
+    void msg.auto('invoice', data.dealerId, vars.invoice(db, { ...preview, ts: 0 }, total - data.received), nextId)
+    setDeliverNow(false)
     print(<InvoiceDoc db={db} inv={preview} />)
     setF(blank(db, f.dealerId))
     // dealers who take courier delivery get their parcel booked straight away
@@ -139,13 +173,15 @@ export default function SellPage({ params }: FeatureRouteProps) {
     <>
       <PageHead title="Sell to dealer" sub="Pick the dealer and goods, choose cash on delivery or credit, and the invoice is made for you." actions={
         <>
+          <Button variant="secondary" icon="receipt" onClick={saveEstimate}>{f.quoteId ? 'Update estimate' : 'Save as estimate'}</Button>
           <Button variant="secondary" onClick={saveDraft}>Save draft</Button>
-          <Button onClick={() => void finalize()}>Save and print invoice</Button>
+          <Button onClick={() => void finalize()}>{f.quoteId ? 'Bill this estimate' : 'Save and print invoice'}</Button>
         </>
       } />
       <div className="grid-sell edit-only">
         <Card>
           <div className="card-body stack-sm">
+            {f.quoteId && <div className="note">Working on estimate <b>{f.quoteId}</b>. Update it and send it again, or bill it once the dealer approves. <button type="button" className="link" onClick={() => setF(blank(db, f.dealerId))}>Start fresh</button></div>}
             {f.draftId && <div className="note">Continuing a saved draft. <button type="button" className="link" onClick={() => setF(blank(db, f.dealerId))}>Start a new invoice instead</button></div>}
             {err && <div className="err" role="alert">{err}</div>}
             <div className="form-grid">
@@ -183,12 +219,12 @@ export default function SellPage({ params }: FeatureRouteProps) {
               <div className="lines-head"><span>Product</span><span>Quantity</span><span>Dealer price</span><span>Amount</span><span /></div>
               {f.lines.map((l, i) => {
                 const p = byId(db.products, l.productId)
-                const short = num(l.qty) > (p?.stock || 0)
+                const short = !!p && num(l.qty) > availableQty(db, p)
                 return (
                   <div className="line" key={l.productId}>
                     <div className="line-name">
                       <b>{p?.name}</b>
-                      <small className={short ? 't-warn' : 't-muted'}>{fmt(p?.stock)} {p?.unit} in warehouse</small>
+                      <small className={short ? 't-warn' : 't-muted'}>{fmt(p ? availableQty(db, p) : 0)} {p?.unit} free to sell{p && reservedQty(db, p.id) ? ` · ${fmt(reservedQty(db, p.id))} held for delivery` : ''}</small>
                     </div>
                     <label><span>Qty</span><input className="in" inputMode="decimal" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} aria-label={`Quantity of ${p?.name}`} /></label>
                     <label><span>Price</span><input className="in" inputMode="decimal" value={l.price} onChange={(e) => setLine(i, { price: e.target.value })} aria-label={`Price of ${p?.name}`} /></label>
@@ -217,6 +253,11 @@ export default function SellPage({ params }: FeatureRouteProps) {
               <div className={`kv strong ${due > 0 ? 't-warn' : ''}`}><span>Due on this invoice</span><span>{tk(due)}</span></div>
             </div>
 
+            <label className="check"><input type="checkbox" checked={deliverNow} onChange={(e) => setDeliverNow(e.target.checked)} /> Goods handed over now (counter sale). Otherwise the bill waits in Delivery and stock moves when the goods go.</label>
+            <div className="form-grid">
+              <Field label="Estimate valid until" hint="Used when saved as an estimate"><input className="in" type="date" value={f.validUntil || ''} onChange={(e) => set({ validUntil: e.target.value })} /></Field>
+              <Field label="Note on the estimate"><input className="in" value={f.note || ''} onChange={(e) => set({ note: e.target.value })} placeholder="e.g. price includes delivery to Agrabad" /></Field>
+            </div>
             {dealer && led && dealer.terms === 'credit' && (
               <div className={`credit-box ${overLimit ? 'over' : ''}`}>
                 <span>Credit limit <b>{tk(dealer.limit)}</b></span>
@@ -232,6 +273,18 @@ export default function SellPage({ params }: FeatureRouteProps) {
           <div className="invoice-wrap paper"><InvoiceDoc db={db} inv={preview} /></div>
         </div>
       </div>
+
+      <Card icon="receipt" title="Estimates for dealers" sub="Prices sent for approval. Once a dealer agrees, open the estimate and make the bill.">
+        <DataTable pageSize={10} rows={db.quotes || []} rowKey={(q) => q.id} onRow={(q) => sheets.open(QuoteSheet, { quoteId: q.id })}
+          empty="No estimates yet. Fill the form above and press Save as estimate."
+          columns={[
+            { label: 'Estimate', primary: true, render: (q) => <span className="two-line"><b>{q.id}</b><small>{fdate(q.date)}{q.validUntil ? ` · valid until ${fdate(q.validUntil)}` : ''}</small></span> },
+            { label: 'Dealer', render: (q) => byId(db.dealers, q.dealerId)?.name },
+            { label: 'Goods', render: (q) => <span className="t-muted">{q.lines.map((l) => `${fmt(l.qty)} ${l.unit || ''}`).join(', ')}</span> },
+            { label: 'Total', align: 'right', render: (q) => tk(q.lines.reduce((s, l) => s + l.qty * l.price, 0) - q.discount) },
+            { label: 'Status', render: (q) => <span className="two-line"><Pill tone={QUOTE_TONE[q.status]}>{QUOTE_TEXT[q.status]}</Pill>{q.invoiceId && <small className="t-muted">{q.invoiceId}</small>}</span> },
+          ]} />
+      </Card>
 
       <Card title="Recent invoices">
         <DataTable

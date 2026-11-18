@@ -14,6 +14,7 @@ export function TrackPanel() {
   const sheets = useSheets()
   const { track } = useCourier()
   const couriers = enabledCouriers(db).filter(canTrack)
+  if (!couriers.length) couriers.push('demo')
   const [provider, setProvider] = useState<CourierProvider>(couriers[0] || 'demo')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -29,7 +30,7 @@ export function TrackPanel() {
     if (!c) return setErr('Enter a tracking code or consignment number.')
     setBusy(true)
     try {
-      setRes(await track(ours?.provider && canTrack(ours.provider) ? ours.provider : provider, ours?.consignmentId || code.trim()))
+      setRes(await track(ours?.provider && canTrack(ours.provider) ? ours.provider : provider, ours?.consignmentId || code.trim(), ours?.test))
     } catch (x) {
       setErr(x instanceof ApiError ? x.message : 'Could not reach the courier.')
     } finally {

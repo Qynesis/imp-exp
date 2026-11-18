@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { isAdmin, type CourierProvider } from '@shared/domain'
+import { isAdmin, todayISO, type CourierProvider } from '@shared/domain'
 import { COURIER_PROVIDERS, courierLabel, FIELDS, hasBalance, needsKeys, type KeyName } from '@shared/courier'
 import { ApiError, BACKEND } from '@/core/api/client'
 import { useBooks } from '@/core/store/context'
@@ -69,6 +69,19 @@ export function CouriersPanel() {
             <span className="field-label">Automatic booking</span>
             <Segmented<'on' | 'off'> label="Automatic booking" value={cur.autoBook ? 'on' : 'off'} onChange={(x) => save({ autoBook: x === 'on' })} options={[{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }]} />
             <small>When on, saving a sale for a dealer marked “Deliver by courier” books the parcel with the default courier.</small>
+          </div>
+          <div className="field">
+            <span className="field-label">Test mode</span>
+            <Segmented<'on' | 'off'> label="Test mode" value={cur.testMode ? 'on' : 'off'} onChange={(x) => save({ testMode: x === 'on' })} options={[{ value: 'off', label: 'Off (real couriers)' }, { value: 'on', label: 'On (simulated)' }]} />
+            <small>{cur.testMode ? 'Bookings, tracking and areas are simulated inside the app. Nothing reaches a courier and no keys are needed.' : 'Bookings go to the real courier with your keys.'}</small>
+          </div>
+          <div className="field">
+            <span className="field-label">Sample parcels</span>
+            <div className="btn-row tight-row">
+              <Button size="sm" variant="secondary" icon="parcel" onClick={() => { act('loadSampleParcels', { today: todayISO() }); toast('14 sample parcels added, test mode on') }}>Load sample parcels</Button>
+              {(db.parcels || []).some((x) => x.test) && <Button size="sm" variant="danger" icon="trash" onClick={() => { act('removeSampleParcels', {}); toast('Sample and test parcels removed') }}>Remove samples</Button>}
+            </div>
+            <small>{(db.parcels || []).filter((x) => x.test).length} test parcels now. Real parcels are never touched.</small>
           </div>
           {BACKEND === 'local' && <p className="field wide note">This copy runs in the browser only, so keys saved here stay in this browser and bookings go straight from it to the courier. Use Save and test to see whether your courier accepts that. For the safest setup run the app with the server, where keys live in its .env and never reach a browser.</p>}
           {loadErr && <p className="field wide err">{loadErr}</p>}

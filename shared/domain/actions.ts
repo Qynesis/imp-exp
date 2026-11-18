@@ -6,10 +6,11 @@ import { applyBusinessTypes, TRANSPORT_HEAD } from './catalog'
 import { byId, mustFind } from './calc/common'
 import { emptyCustoms } from './calc/customs'
 import { productInUse } from './calc/products'
+import { sampleParcels } from './sampleParcels'
 import { computeShipment } from './calc/shipments'
 import type {
   Advance, BusinessTypeId, Category, Collection, Company, CustomsInfo, CustomsStage, Dealer, Db, Direction, Employee, Expense, Factory,
-  FactoryOrderType, FieldDef, ISODate, Invoice, FactoryEstimate, MaterialGiven, MaterialSettlement, Parcel, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
+  FactoryOrderType, FieldDef, ISODate, Invoice, Delivery, FactoryEstimate, MaterialGiven, MessageLog, MessagingSettings, SalesQuote, SalesReturn, MaterialSettlement, Parcel, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
   CustomValues,
 } from './types'
 
@@ -269,25 +270,81 @@ export const actions = {
     if (cur) Object.assign(cur, p)
     else d.dealers.push({ ...p, id: uid(d, 'd') })
   },
-  saveInvoice(d: Db, p: { id: string; data: InvoiceData; final: boolean }) {
+  /**
+   * Save a draft, or make the final bill. A final bill does not take stock out: it waits in the
+   * delivery section until the goods go, unless `deliverNow` says they were handed over on the spot.
+   */
+  saveInvoice(d: Db, p: { id: string; data: InvoiceData; final: boolean; deliverNow?: boolean; quoteId?: string }) {
     let inv = byId(d.invoices, p.id)
     if (!inv) {
       inv = { ...p.data, id: uid(d, 'DRAFT-'), status: 'draft', ts: 0 }
       d.invoices.push(inv)
     }
     Object.assign(inv, p.data, { ts: tick(d) })
+    if (p.quoteId) inv.quoteId = p.quoteId
     if (p.final) {
       inv.status = 'final'
       inv.id = (d.company.invoicePrefix || '') + d.seq.inv++
+      inv.stockOnDelivery = true
       for (const l of inv.lines) {
         // freeze wording and cost so later edits to the product do not change old invoices or profit
         const prod = mustFind(d.products, l.productId, 'Product')
         l.name = prod.name
         l.unit = prod.unit
         l.cost = prod.cost
-        prod.stock -= l.qty
+      }
+      if (p.deliverNow) deliver(d, { invoiceId: inv.id, date: inv.date, lines: inv.lines.map((l) => ({ productId: l.productId, qty: l.qty })), via: 'pickup', receivedBy: '', note: 'Handed over with the bill' })
+      const q = byId(d.quotes || [], inv.quoteId)
+      if (q) {
+        q.status = 'invoiced'
+        q.invoiceId = inv.id
       }
     }
+  },
+  /** Goods handed over against an invoice, all or part. Stock leaves the warehouse here. */
+  recordDelivery(d: Db, p: Omit<Delivery, 'id' | 'ts' | 'dealerId'>) {
+    deliver(d, p)
+  },
+  /** Goods coming back from a dealer: good ones go back into stock, and the credit comes off what they owe. */
+  recordReturn(d: Db, p: Omit<SalesReturn, 'id' | 'ts'>) {
+    const lines = p.lines.filter((l) => l.qty > 0)
+    if (!lines.length) throw new Error('Nothing returned')
+    if (p.condition === 'restock') for (const l of lines) mustFind(d.products, l.productId, 'Product').stock += l.qty
+    ;(d.returns ??= []).push({ ...p, lines, id: uid(d, 'RT-'), ts: tick(d) })
+  },
+  /** A new dealer estimate, or changes to one not yet billed. A changed estimate has to be approved again. */
+  saveQuote(d: Db, p: Omit<SalesQuote, 'id' | 'ts' | 'status'> & { id?: string }) {
+    const list = (d.quotes ??= [])
+    const cur = byId(list, p.id)
+    if (cur) {
+      if (cur.status === 'invoiced') throw new Error('Estimate already billed')
+      Object.assign(cur, p, { status: 'draft', sentOn: undefined, answeredOn: undefined, answer: undefined })
+    } else {
+      list.unshift({ ...p, id: 'QT-' + (d.seq.qt ??= 101), ts: tick(d), status: 'draft' })
+      d.seq.qt++
+    }
+  },
+  setQuoteStatus(d: Db, p: { id: string; status: 'sent' | 'approved' | 'rejected'; date: ISODate; answer?: string }) {
+    const q = mustFind(d.quotes || [], p.id, 'Estimate')
+    if (q.status === 'invoiced') throw new Error('Estimate already billed')
+    q.status = p.status
+    if (p.status === 'sent') q.sentOn = p.date
+    else {
+      q.answeredOn = p.date
+      q.answer = p.answer || undefined
+    }
+  },
+  removeQuote(d: Db, id: string) {
+    d.quotes = (d.quotes || []).filter((q) => q.id !== id || q.status === 'invoiced')
+  },
+  logMessage(d: Db, p: Omit<MessageLog, 'id' | 'ts'>) {
+    const list = (d.messages ??= [])
+    list.unshift({ ...p, id: uid(d, 'msg'), ts: tick(d) })
+    // keep the log to a sensible size
+    if (list.length > 2000) list.length = 2000
+  },
+  saveMessaging(d: Db, p: MessagingSettings) {
+    d.company.messaging = p
   },
   collect(d: Db, p: Omit<Collection, 'id' | 'ts'>) {
     d.collections.push({ id: uid(d, 'col'), ts: tick(d), ...p })
@@ -340,6 +397,16 @@ export const actions = {
     if (cur) Object.assign(cur, p)
     else list.unshift({ ...p, id: uid(d, 'pc'), ts: tick(d) })
   },
+  /** Sample parcels across every courier, and test mode on, so the Courier screen can be tried without keys. */
+  loadSampleParcels(d: Db, p: { today: ISODate }) {
+    const list = (d.parcels ??= [])
+    for (const x of sampleParcels(d, p.today)) list.unshift({ ...x, id: uid(d, 'pc'), ts: tick(d) })
+    d.company.courier = { provider: d.company.courier?.provider || 'steadfast', autoBook: d.company.courier?.autoBook || false, enabled: ['steadfast', 'pathao', 'redx', 'manual', 'demo'], testMode: true }
+  },
+  /** Remove every sample parcel; real ones stay. */
+  removeSampleParcels(d: Db, _: Record<string, never>) {
+    d.parcels = (d.parcels || []).filter((x) => !x.test)
+  },
   setParcelStatus(d: Db, p: { id: string; status: string; date: ISODate }) {
     const x = mustFind(d.parcels || [], p.id, 'Parcel')
     if (x.status === p.status) return
@@ -367,6 +434,14 @@ export const actions = {
     d.payroll.push({ id: uid(d, 'pr'), ts: tick(d), ...p })
   },
 } satisfies Record<string, (d: Db, payload: never) => void>
+
+function deliver(d: Db, p: Omit<Delivery, 'id' | 'ts' | 'dealerId'>) {
+  const inv = mustFind(d.invoices, p.invoiceId, 'Invoice')
+  const lines = p.lines.filter((l) => l.qty > 0)
+  if (!lines.length) throw new Error('Nothing delivered')
+  for (const l of lines) mustFind(d.products, l.productId, 'Product').stock -= l.qty
+  ;(d.deliveries ??= []).push({ ...p, lines, dealerId: inv.dealerId, id: uid(d, 'DL-'), ts: tick(d) })
+}
 
 function addTransportExpense(d: Db, p: { date: ISODate; amount: number; method: string; details: string; link: TransportLink }) {
   const v = byId(d.vehicles || [], p.link.vehicleId)

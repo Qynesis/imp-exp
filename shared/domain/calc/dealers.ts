@@ -50,7 +50,9 @@ export const dealerLedger = (db: Db, dealerId: string): DealerLedger =>
         dueDate: inv.terms === 'credit' ? addDays(inv.date, dealer.days || 0) : inv.date,
       })
     }
-    const cols = db.collections.filter((c) => c.dealerId === dealerId).sort(byDateTs)
+    // returned goods credited to the dealer pay off debts like a collection, without cash changing hands
+    const credits = (db.returns || []).filter((r) => r.dealerId === dealerId && r.credit > 0).map((r) => ({ ...r, amount: r.credit, method: 'Return credit', collectedBy: '' }))
+    const cols = [...db.collections.filter((c) => c.dealerId === dealerId), ...credits].sort(byDateTs)
     for (const c of cols) {
       let amt = c.amount
       const target = c.invoiceId ? debts.find((d) => d.id === c.invoiceId) : undefined
@@ -79,7 +81,7 @@ export const dealerLedger = (db: Db, dealerId: string): DealerLedger =>
       else statusText = `Due in ${days} day${plural(days)}`
     }
     const payments = [
-      ...cols.map((c) => ({ amount: c.amount, date: c.date, ts: c.ts, label: `Collection · ${c.method}` })),
+      ...cols.map((c) => ({ amount: c.amount, date: c.date, ts: c.ts, label: c.method === 'Return credit' ? 'Goods returned (credit)' : `Collection · ${c.method}` })),
       ...invs.filter((i) => i.received > 0).map((i) => ({ amount: i.received, date: i.date, ts: i.ts, label: `Received on ${i.id}` })),
     ].sort(newestFirst)
     return { dealer, debts, open, due, days, overdue: due > 0 && days !== null && days < 0, statusText, payments, lastPayment: payments[0] || null }

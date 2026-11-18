@@ -18,6 +18,8 @@ export type PageId =
   | 'sales-analytics'
   | 'transport'
   | 'courier'
+  | 'deliveries'
+  | 'messages'
   | 'suppliers'
   | 'imports'
   | 'customs'
@@ -60,6 +62,8 @@ export interface Company {
   salesTarget?: number
   /** Courier service for delivering to customers; missing until set up. */
   courier?: CourierSettings
+  /** WhatsApp and SMS; missing until set up. */
+  messaging?: MessagingSettings
 }
 
 /* ---------- custom fields ---------- */
@@ -371,6 +375,94 @@ export interface Invoice extends Dated {
   discount: number
   received: number
   method: string
+  /**
+   * Set on invoices saved after the delivery section was added: stock leaves the warehouse when the
+   * goods are delivered, not when the bill is made. Older invoices took stock out at once.
+   */
+  stockOnDelivery?: boolean
+  /** The estimate this invoice was made from. */
+  quoteId?: string
+}
+
+/* ---------- delivery, returns, estimates to dealers ---------- */
+export interface QtyLine {
+  productId: string
+  qty: number
+}
+export type DeliveryVia = 'own' | 'courier' | 'pickup' | 'hired'
+/** Goods actually handed over against an invoice: all of it or part. Stock moves here. */
+export interface Delivery extends Dated {
+  id: string
+  invoiceId: string
+  dealerId: string
+  lines: QtyLine[]
+  via: DeliveryVia
+  tripId?: string
+  parcelId?: string
+  receivedBy: string
+  note: string
+}
+export type ReturnCondition = 'restock' | 'damaged'
+/** Goods a dealer sent back. Good goods go back into stock; the credit comes off what the dealer owes. */
+export interface SalesReturn extends Dated {
+  id: string
+  invoiceId: string
+  dealerId: string
+  lines: (QtyLine & { price: number })[]
+  condition: ReturnCondition
+  /** Taken off the dealer's due. 0 when the goods are replaced instead. */
+  credit: number
+  reason: string
+  note: string
+}
+export type QuoteStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'invoiced'
+/** A price estimate for a dealer, approved before it becomes an invoice. */
+export interface SalesQuote extends Dated {
+  id: string
+  dealerId: string
+  soldBy: string
+  terms: DealerTerms
+  lines: InvoiceLine[]
+  discount: number
+  validUntil: ISODate | ''
+  note: string
+  status: QuoteStatus
+  sentOn?: ISODate
+  answeredOn?: ISODate
+  answer?: string
+  invoiceId?: string
+}
+
+/* ---------- messages (WhatsApp and SMS) ---------- */
+export type MessageKind = 'estimate' | 'invoice' | 'payment' | 'reminder' | 'occasional' | 'delivery'
+export type MessageChannel = 'whatsapp' | 'sms'
+export interface MessageLog extends Dated {
+  id: string
+  kind: MessageKind
+  channel: MessageChannel
+  to: string
+  dealerId: string
+  text: string
+  /** sent: delivered to the gateway; opened: WhatsApp opened for a person to press send; failed: see error. */
+  status: 'sent' | 'opened' | 'failed'
+  error?: string
+  /** Invoice, estimate or collection it is about. */
+  ref?: string
+  /** Sent in test mode: nothing left the app. */
+  test?: boolean
+}
+export interface MessagingSettings {
+  /** link: opens WhatsApp with the text ready (free, a person presses send). cloud: WhatsApp Business API sends by itself. */
+  whatsapp: 'off' | 'link' | 'cloud'
+  sms: 'off' | 'gateway'
+  /** Which kinds go out by themselves, and on which channels. */
+  auto: Partial<Record<MessageKind, MessageChannel[]>>
+  /** Remind dealers this many days after a bill falls due, then again every this many days. */
+  reminderDays: number
+  templates: Partial<Record<MessageKind, string>>
+  testMode: boolean
+  /** Last day automatic reminders ran. */
+  lastReminderRun?: ISODate
 }
 export interface Collection extends Dated {
   id: string
@@ -514,6 +606,8 @@ export interface Sequences {
   trip?: number
   /** Next estimate number; missing in older books. */
   est?: number
+  /** Next dealer estimate (quote) number. */
+  qt?: number
 }
 
 export interface Db {
@@ -552,6 +646,11 @@ export interface Db {
   estimates?: FactoryEstimate[]
   /** Missing in books saved before courier booking was added. */
   parcels?: Parcel[]
+  /** Missing in books saved before the delivery section was added. */
+  deliveries?: Delivery[]
+  returns?: SalesReturn[]
+  quotes?: SalesQuote[]
+  messages?: MessageLog[]
 }
 
 /* ---------- courier ---------- */
@@ -564,6 +663,8 @@ export interface CourierSettings {
   autoBook: boolean
   /** Couriers offered when booking; missing means just the default one. */
   enabled?: CourierProvider[]
+  /** Test mode: every courier is simulated inside the app, so nothing real is booked and no keys are needed. */
+  testMode?: boolean
 }
 export interface ParcelEvent {
   date: ISODate
@@ -593,6 +694,8 @@ export interface Parcel extends Dated {
   charge?: number
   /** Our reference sent to the courier: the invoice number, or an order number for other customers. */
   reference?: string
+  /** Booked in test mode or loaded as sample data: never sent to a real courier. */
+  test?: boolean
 }
 
 /** Cheap structural check before trusting a parsed backup or API payload. */

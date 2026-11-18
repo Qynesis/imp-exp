@@ -31,6 +31,12 @@ export default function CourierPage({ params: [tabParam] }: FeatureRouteProps) {
           <Button icon="parcel" onClick={() => sheets.open(BookCourierSheet, {})}>Book a parcel</Button>
         </>
       } />
+      {db.company.courier?.testMode && (
+        <div className="alert-strip info" role="status">
+          <div><b>Test mode is on</b><span>Bookings, tracking and courier areas are simulated. Nothing is sent to Steadfast, Pathao or RedX. Turn it off under Couriers when your keys are in.</span></div>
+          <button type="button" className="link" onClick={() => go('courier/couriers')}>Couriers</button>
+        </div>
+      )}
       <div className="stats">
         <Stat icon="truck" label="On the way" value={String(out.length)} sub={out.length ? `${out.filter((p) => p.status === 'in_review' || p.status === 'pickup-pending' || p.status === 'pickup_requested').length} waiting for pickup` : 'Nothing out right now'} />
         <Stat icon="check" label="Delivered this month" value={String(deliveredMonth.length)} sub={`${tk(deliveredMonth.reduce((s, p) => s + p.cod, 0))} collected by couriers`} />

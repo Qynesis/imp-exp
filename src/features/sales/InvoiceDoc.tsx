@@ -1,7 +1,8 @@
 import { byId, fdate, fmt, invSubtotal, invTotal, tk, type Db, type Invoice } from '@shared/domain'
 
 /** The printable invoice. Used for the live preview, for viewing old invoices and for printing. */
-export function InvoiceDoc({ db, inv }: { db: Db; inv: Pick<Invoice, 'id' | 'status' | 'date' | 'dealerId' | 'terms' | 'lines' | 'discount' | 'received'> }) {
+/** With `estimate`, the same page becomes a price estimate: no payment lines, and how long the prices hold. */
+export function InvoiceDoc({ db, inv, estimate }: { db: Db; inv: Pick<Invoice, 'id' | 'status' | 'date' | 'dealerId' | 'terms' | 'lines' | 'discount' | 'received'>; estimate?: { validUntil: string; note: string } }) {
   const dealer = byId(db.dealers, inv.dealerId)
   const co = db.company
   const total = invTotal(inv)
@@ -18,13 +19,13 @@ export function InvoiceDoc({ db, inv }: { db: Db; inv: Pick<Invoice, 'id' | 'sta
           </div>
         </div>
         <div className="inv-right">
-          <div className="inv-title">{inv.status === 'draft' ? 'Draft invoice' : 'Invoice'}</div>
+          <div className="inv-title">{estimate ? 'Estimate' : inv.status === 'draft' ? 'Draft invoice' : 'Invoice'}</div>
           <div className="inv-muted">{inv.id} · {fdate(inv.date)}</div>
         </div>
       </div>
       <div className="inv-top">
         <div>
-          <div className="inv-muted">Bill to</div>
+          <div className="inv-muted">{estimate ? 'For' : 'Bill to'}</div>
           <div className="inv-strong">{dealer?.name || 'Choose a dealer'}</div>
           {dealer && <div className="inv-muted">{[dealer.address, dealer.area, dealer.phone].filter(Boolean).join(' · ')}</div>}
         </div>
@@ -55,10 +56,11 @@ export function InvoiceDoc({ db, inv }: { db: Db; inv: Pick<Invoice, 'id' | 'sta
       <div className="inv-sum">
         <div><span>Subtotal</span><span>{tk(invSubtotal(inv))}</span></div>
         {inv.discount > 0 && <div><span>Discount</span><span>{tk(inv.discount)}</span></div>}
-        <div className="total"><span>Total</span><span>{tk(total)}</span></div>
-        <div><span>Paid</span><span>{tk(received)}</span></div>
-        <div className="strong"><span>Due</span><span>{tk(total - received)}</span></div>
+        <div className="total"><span>{estimate ? 'Estimated total' : 'Total'}</span><span>{tk(total)}</span></div>
+        {!estimate && <div><span>Paid</span><span>{tk(received)}</span></div>}
+        {!estimate && <div className="strong"><span>Due</span><span>{tk(total - received)}</span></div>}
       </div>
+      {estimate && <p className="inv-note">{estimate.validUntil ? `Prices hold until ${fdate(estimate.validUntil)}. ` : ''}{estimate.note} Please confirm and we will send the bill.</p>}
       {co.invoiceNote && <p className="inv-note">{co.invoiceNote}</p>}
       <div className="inv-sign">
         <span>Received by</span>

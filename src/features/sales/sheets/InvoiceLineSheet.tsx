@@ -1,4 +1,4 @@
-import { byId, fmt, num } from '@shared/domain'
+import { availableQty, byId, fmt, num, reservedQty } from '@shared/domain'
 import { useBooks } from '@/core/store/context'
 import { Field, FormSheet, useForm } from '@/ui'
 
@@ -15,11 +15,11 @@ export function InvoiceLineSheet({ onAdd, taken = [] }: { onAdd: (line: NewLine)
   const p = byId(db.products, v.productId)
   return (
     <FormSheet title="Add product to invoice" crumb="Sell to dealer" submit="Add to invoice"
-      note={p ? `${fmt(p.stock)} ${p.unit} in warehouse.` : 'No more finished goods to add.'}
+      note={p ? `${fmt(Math.max(availableQty(db, p), 0))} ${p.unit} free to sell (${fmt(p.stock)} in the warehouse${reservedQty(db, p.id) ? `, ${fmt(reservedQty(db, p.id))} held for bills waiting for delivery` : ''}).` : 'No more finished goods to add.'}
       onSubmit={() => {
         if (!p) return 'Choose a product.'
         if (num(v.qty) <= 0) return 'Enter the quantity.'
-        if (num(v.qty) > p.stock) return `Only ${fmt(p.stock)} ${p.unit} in the warehouse.`
+        if (num(v.qty) > availableQty(db, p)) return `Only ${fmt(Math.max(availableQty(db, p), 0))} ${p.unit} is free to sell.`
         if (num(v.price) <= 0) return 'Enter the dealer price.'
         onAdd({ productId: p.id, qty: num(v.qty), price: num(v.price) })
       }}>

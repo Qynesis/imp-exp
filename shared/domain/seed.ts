@@ -1,10 +1,11 @@
 import { applyBusinessTypes, TRANSPORT_HEAD, WAREHOUSE_PLACE } from './catalog'
 import { cashForDay } from './calc/cashbook'
 import { stockHistory } from './calc/products'
+import { sampleParcels } from './sampleParcels'
 import { addDays, addMonths, daysBetween, parse, todayISO } from './format'
 import { defaultRoles } from './permissions'
 import type {
-  Collection, Dealer, DealerTerms, Expense, TransportCostKind, TransportLink, Trip, TripStatus, Vehicle, Db, Employee, FactoryBill, FactoryOrder, FactoryOrderType, FactoryPayment, FactoryReceipt, Invoice, InvoiceLine, ISODate,
+  Collection, Dealer, DealerTerms, Expense, MessageKind, TransportCostKind, TransportLink, Trip, TripStatus, Vehicle, Db, Employee, FactoryBill, FactoryOrder, FactoryOrderType, FactoryPayment, FactoryReceipt, Invoice, InvoiceLine, ISODate,
   MaterialGiven, Product, ProductKind, Purchase, ShipmentCost, SupplierPayment, SupplierTerms,
 } from './types'
 
@@ -190,6 +191,14 @@ export function demoDb(): Db {
     D('d4', 'Al-Amin Distribution', 'Patiya', 'credit', 80000, 30, 'e5'),
     D('d5', 'Madina General Store', 'Halishahar', 'cod', 0, 0, ''),
   ]
+  // contact details so messages and couriers have someone to reach
+  const contacts: Record<string, [string, string, string]> = {
+    d1: ['Abdur Rahman', '01711-284530', 'Shop 22, Agrabad Commercial Area'],
+    d2: ['Mohammad Ali', '01819-336721', 'Chawkbazar Main Road'],
+    d3: ['Nurul Islam', '01915-702288', 'Hathazari Bazar'],
+    d4: ['Aminul Haque', '01672-440913', 'Patiya Sadar Road'],
+  }
+  for (const x of db.dealers) if (contacts[x.id]) Object.assign(x, { owner: contacts[x.id][0], phone: contacts[x.id][1], address: contacts[x.id][2] })
 
   const line = (productId: string, qty: number): InvoiceLine => {
     const p = db.products.find((x) => x.id === productId) as Product
@@ -236,26 +245,14 @@ export function demoDb(): Db {
   ]
 
   db.company.salesTarget = 3000000
-  db.company.courier = { provider: 'demo', autoBook: false }
   const madina = db.dealers.find((x) => x.id === 'd5')
   if (madina) Object.assign(madina, { courier: true, phone: '01812-447090', owner: 'Abdul Kader', address: 'Shop 14, Port Connecting Road' })
-  // two parcels sent through the demo courier: one delivered, one still on the way
-  const sent = db.invoices.filter((i) => i.dealerId === 'd5' && i.status === 'final').slice(-2)
-  db.parcels = sent.map((inv, k) => {
-    const date = inv.date
-    const delivered = k === 0
-    const total = inv.lines.reduce((s, l) => s + l.qty * l.price, 0) - (inv.discount || 0)
-    return {
-      id: 'pc' + (k + 1), ts: t(), date, invoiceId: inv.id, dealerId: 'd5', provider: 'demo' as const,
-      // a demo consignment number carries its booking time, which drives its status
-      consignmentId: `DEMO-${(Date.now() - (delivered ? 86400000 * 3 : 120000)).toString(36).toUpperCase()}`, trackingCode: `DM${inv.id.replace(/\W/g, '')}`, trackingUrl: '',
-      status: delivered ? 'delivered' : 'in_review', cod: delivered ? 0 : total, recipientName: 'Abdul Kader (Madina General Store)', phone: '01812-447090',
-      address: 'Shop 14, Port Connecting Road, Halishahar', note: inv.lines.map((l) => `${l.qty} ${l.unit}`).join(', '),
-      history: delivered ? [{ date, status: 'in_review' }, { date, status: 'in_transit' }, { date: T, status: 'delivered' }] : [{ date, status: 'in_review' }],
-    }
-  })
+  // sample parcels across every courier, with test mode on so nothing real is ever booked
+  db.company.courier = { provider: 'steadfast', autoBook: false, enabled: ['steadfast', 'pathao', 'redx', 'manual', 'demo'], testMode: true }
+  db.parcels = sampleParcels(db, T).map((x, k) => ({ ...x, id: 'pc' + (k + 1), ts: t() }))
+  addDeliveryAndMessages(db, T, t)
   for (const [id, target] of [['e4', 1500000], ['e5', 1200000]] as const) (db.employees.find((e) => e.id === id) as Employee).salesTarget = target
-  db.seq = { id: 1000, ts, fo: 1043, inv: 2312, imp: 16, exp: 2, pb: 222, est: 104 }
+  db.seq = { id: 1000, ts, fo: 1043, inv: 2312, imp: 16, exp: 2, pb: 222, est: 104, qt: 104 }
   ts = addTransportHistory(db, T, ts)
   applyBusinessTypes(db, ['food'])
   // choose the opening cash so that today opens at Tk 4,10,000
@@ -421,4 +418,71 @@ function addTransportHistory(db: Db, today: ISODate, ts: number): number {
   db.expenses = [...db.expenses, ...exp]
   db.seq.trip = no
   return ts
+}
+
+/**
+ * Delivery, returns, dealer estimates and a message log for the demo. The bills of the last few days
+ * wait in the delivery section (one part delivered); older bills count as delivered, a few with returns.
+ */
+function addDeliveryAndMessages(db: Db, today: ISODate, tick: () => number) {
+  const d = (n: number) => addDays(today, -n)
+  const finals = db.invoices.filter((i) => i.status === 'final')
+  const recent = finals.filter((i) => i.date >= d(3))
+  db.deliveries = []
+  recent.forEach((inv, k) => {
+    inv.stockOnDelivery = true
+    // the oldest of them went out in full, the next in part, the rest still wait
+    if (k === 0) db.deliveries!.push({ id: 'DL-1', ts: tick(), date: inv.date, invoiceId: inv.id, dealerId: inv.dealerId, lines: inv.lines.map((l) => ({ productId: l.productId, qty: l.qty })), via: 'own', receivedBy: 'Shop manager', note: '' })
+    if (k === 1) db.deliveries!.push({ id: 'DL-2', ts: tick(), date: addDays(inv.date, 1) > today ? inv.date : addDays(inv.date, 1), invoiceId: inv.id, dealerId: inv.dealerId, lines: inv.lines.slice(0, 1).map((l) => ({ productId: l.productId, qty: Math.max(1, Math.floor(l.qty / 2)) })), via: 'own', receivedBy: '', note: 'Truck full, rest tomorrow' })
+  })
+  // returns against older, fully delivered bills
+  const older = finals.filter((i) => i.date < d(5) && i.date >= d(60))
+  const R = (k: number, ago: number, condition: 'restock' | 'damaged', reason: string, note: string, share: number) => {
+    const inv = older[(k * 7) % Math.max(older.length, 1)]
+    if (!inv) return null
+    const l = inv.lines[0]
+    const qty = Math.max(1, Math.round(l.qty * share))
+    return { id: `RT-${k + 1}`, ts: tick(), date: d(ago), invoiceId: inv.id, dealerId: inv.dealerId, lines: [{ productId: l.productId, qty, price: l.price }], condition, credit: qty * l.price, reason, note }
+  }
+  db.returns = [
+    R(0, 4, 'damaged', 'Damaged in transit', 'Bottom cartons crushed', 0.05),
+    R(1, 11, 'restock', 'Dealer could not sell', 'Slow in that market, took back unopened', 0.15),
+    R(2, 19, 'damaged', 'Expired or near expiry', 'Batch near expiry', 0.08),
+    R(3, 33, 'restock', 'Wrong item sent', 'Sent 5 L jars instead of 1 L pouches', 0.1),
+  ].filter((x): x is NonNullable<typeof x> => !!x)
+  for (const r of db.returns) if (r.condition === 'restock') for (const l of r.lines) { const p = db.products.find((x) => x.id === l.productId); if (p) p.stock += l.qty }
+  // the warehouse holds what the waiting bills need, with room to sell more
+  for (const p of db.products.filter((x) => x.kind === 'finished')) {
+    const held = recent.reduce((n, inv) => n + inv.lines.filter((l) => l.productId === p.id).reduce((m, l) => m + l.qty, 0), 0) - db.deliveries.filter((x) => recent.some((i) => i.id === x.invoiceId)).reduce((n, x) => n + x.lines.filter((l) => l.productId === p.id).reduce((m, l) => m + l.qty, 0), 0)
+    p.stock = Math.max(p.stock, held + 3 * (p.lowAt || 10))
+  }
+
+  const line = (id: string, qty: number) => {
+    const p = db.products.find((x) => x.id === id) as Product
+    return { productId: id, qty, price: p.price, name: p.name, unit: p.unit }
+  }
+  db.quotes = [
+    { id: 'QT-103', ts: tick(), date: d(0), dealerId: 'd3', soldBy: 'e5', terms: 'credit', lines: [line('coil', 40), line('jar', 60)], discount: 2000, validUntil: d(-7), note: 'Delivery to Hathazari included.', status: 'draft' },
+    { id: 'QT-102', ts: tick(), date: d(2), dealerId: 'd1', soldBy: 'e4', terms: 'credit', lines: [line('pouch', 300), line('jar', 40)], discount: 0, validUntil: d(-5), note: '', status: 'sent', sentOn: d(2) },
+    { id: 'QT-101', ts: tick(), date: d(5), dealerId: 'd2', soldBy: 'e4', terms: 'credit', lines: [line('coil', 25)], discount: 1000, validUntil: d(-2), note: 'Winter season price.', status: 'approved', sentOn: d(5), answeredOn: d(4), answer: 'Confirmed on phone' },
+  ]
+
+  db.company.messaging = {
+    whatsapp: 'link', sms: 'gateway', testMode: true, reminderDays: 3, templates: {},
+    auto: { invoice: ['whatsapp'], payment: ['whatsapp', 'sms'], reminder: ['sms'], estimate: [], delivery: [], occasional: [] },
+    lastReminderRun: today,
+  }
+  const dealer = (id: string) => db.dealers.find((x) => x.id === id)
+  const M = (ago: number, kind: MessageKind, channel: 'whatsapp' | 'sms', dealerId: string, text: string, status: 'sent' | 'opened' | 'failed' = 'sent', ref = '', error?: string) =>
+    ({ id: 'msg' + tick(), ts: tick(), date: d(ago), kind, channel, to: dealer(dealerId)?.phone || '01700-000000', dealerId, text, status, ref, error, test: true })
+  const co = db.company.name || 'Star Bangla Demo'
+  db.messages = [
+    M(0, 'invoice', 'whatsapp', 'd1', `Dear Rahman Traders, bill INV-2311 from ${co}: 5 cartons, 20 jars. Total Tk 28,500, paid Tk 10,000, due Tk 18,500.`, 'opened', 'INV-2311'),
+    M(1, 'reminder', 'sms', 'd3', `Dear Notun Bazar Enterprise, a friendly reminder from ${co}: Tk 1,47,000 is due. Please pay at your earliest convenience.`, 'sent', 'INV-2296'),
+    M(1, 'reminder', 'sms', 'd2', `Dear Bismillah Store, a friendly reminder from ${co}: Tk 55,000 is due.`, 'failed', 'INV-2301', 'No phone number'),
+    M(2, 'estimate', 'whatsapp', 'd1', `Dear Rahman Traders, estimate QT-102 from ${co}: 300 pouches, 40 jars. Valid for a week.`, 'opened', 'QT-102'),
+    M(4, 'payment', 'sms', 'd2', `Dear Bismillah Store, we received Tk 65,000. Thank you. Your due with ${co} is now Tk 55,000.`, 'sent'),
+    M(9, 'occasional', 'sms', 'd4', `Dear Al-Amin Distribution, new winter stock of mosquito coil is in. Ask your sales officer for the price list. - ${co}`, 'sent'),
+    M(9, 'occasional', 'sms', 'd5', `Dear Madina General Store, new winter stock of mosquito coil is in. - ${co}`, 'sent'),
+  ]
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
-  byId, categoryPath, fmt, inCategory, incomingStock, isLowStock, lastsFor, PRODUCT_SOURCES, productSources, recipeInfo, stockSummary, tk, todayISO, usageRate,
+  byId, categoryPath, reservedQty, fmt, inCategory, incomingStock, isLowStock, lastsFor, PRODUCT_SOURCES, productSources, recipeInfo, stockSummary, tk, todayISO, usageRate,
   type ProductKind,
 } from '@shared/domain'
 import { downloadCsv } from '@/components/downloadCsv'
@@ -92,6 +92,7 @@ export default function ProductsPage() {
               { label: 'In warehouse', align: 'right', render: (r) => (
                 <span className="two-line right">
                   <span className="nowrap"><b>{fmt(r.stock)} {r.unit}</b> {isLowStock(r) && <Pill tone="warn">Low</Pill>}</span>
+                  {reservedQty(db, r.id) > 0 && <small className="t-muted">{fmt(reservedQty(db, r.id))} held for delivery</small>}
                   {r.make.rows.length > 0 && <small className="t-muted">Materials for {fmt(r.make.canMake)} more</small>}
                 </span>
               ) },

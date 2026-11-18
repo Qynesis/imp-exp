@@ -10,10 +10,11 @@
  *   books:<id>        {version, db}                    that company's books
  */
 import { applyBusinessTypes, isBusinessType } from '../domain/catalog'
+import { MESSAGING_FIELDS, MessagingError, sendMessage, type MessagingKeys } from '../messaging'
 import { bookParcel, COURIER_PROVIDERS, courierAreas, courierBalance, CourierError, FIELDS, parcelStatus, testCourier, trackParcel, type BookRequest, type CourierKeys } from '../courier'
 import { isAdmin, OWNER_ROLE_ID } from '../domain/permissions'
 import { demoDb, emptyDb } from '../domain/seed'
-import { isDb, type CourierProvider, type Db } from '../domain/types'
+import { isDb, type CourierProvider, type Db, type MessageChannel } from '../domain/types'
 import type { CompanySummary, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
 
 /* ---------- ports ---------- */
@@ -76,6 +77,8 @@ export interface ApiOptions {
   local?: boolean
   /** Courier keys from the server's environment, per courier. They win over keys saved in the app and never reach a browser. */
   courier?: Partial<Record<CourierProvider, Omit<CourierKeys, 'provider'>>>
+  /** WhatsApp and SMS keys from the server's environment. */
+  messaging?: Partial<Record<MessageChannel, MessagingKeys>>
 }
 
 export interface ApiRequest {
@@ -224,9 +227,17 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       (provider === 'steadfast' ? await store.get<Omit<CourierKeys, 'provider'>>('courier:' + ctx.acc.tenantId) : null) || {}
     return { provider, ...saved }
   }
-  const withKeys = async <T,>(ctx: Ctx, asked: unknown, run: (k: CourierKeys) => Promise<T>): Promise<T> => {
+  const withKeys = async <T,>(ctx: Ctx, asked: unknown, run: (k: CourierKeys) => Promise<T>, test?: unknown): Promise<T> => {
     const provider = (COURIER_PROVIDERS.includes(asked as CourierProvider) ? asked : ctx.tenant.db.company.courier?.provider || 'demo') as CourierProvider
-    return run(await keysFor(ctx, provider))
+    // test mode for the company, or a sample parcel, never reaches a real courier
+    const simulate = !!ctx.tenant.db.company.courier?.testMode || test === true
+    return run({ ...(await keysFor(ctx, provider)), test: simulate })
+  }
+  /** WhatsApp or SMS keys: the server's environment first, then what an admin saved for this company. */
+  const msgKeys = async (ctx: Ctx, ch: MessageChannel): Promise<MessagingKeys> => {
+    const env = opts.messaging?.[ch]
+    if (env && Object.values(env).some(Boolean)) return env
+    return (await store.get<MessagingKeys>(`messaging:${ctx.acc.tenantId}:${ch}`)) || {}
   }
   /** Courier failures become a clear message for the person, not a server error. */
   const courierCall = async <T,>(run: () => Promise<T>): Promise<T> => {
@@ -399,14 +410,14 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const b = obj(req.body)
       const id = str(b.consignmentId)
       if (!id) throw bad('Which parcel?')
-      return courierCall(async () => ({ status: await withKeys(ctx, b.provider, (k) => parcelStatus(k, id)) }))
+      return courierCall(async () => ({ status: await withKeys(ctx, b.provider, (k) => parcelStatus(k, id), b.test) }))
     },
     'POST courier/track': async (req) => {
       const ctx = await auth(req)
       const b = obj(req.body)
       const code = str(b.code).trim()
       if (!code) throw bad('Enter a tracking code or consignment number.')
-      return courierCall(() => withKeys(ctx, b.provider, (k) => trackParcel(k, code)))
+      return courierCall(() => withKeys(ctx, b.provider, (k) => trackParcel(k, code), b.test))
     },
     'POST courier/areas': async (req) => {
       const ctx = await auth(req)
@@ -423,6 +434,51 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       needAdmin(ctx)
       const b = obj(req.body)
       return courierCall(async () => ({ message: await withKeys(ctx, b.provider, (k) => testCourier(k)) }))
+    },
+
+    /* ----- WhatsApp and SMS ----- */
+    'GET messaging/settings': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const out: Record<string, { hints: Record<string, string>; configured: boolean; fromServer: boolean }> = {}
+      for (const ch of ['whatsapp', 'sms'] as MessageChannel[]) {
+        const k = await msgKeys(ctx, ch)
+        const hints: Record<string, string> = {}
+        for (const f of MESSAGING_FIELDS[ch]) hints[f.key] = f.secret ? (k[f.key] ? `•••• ${String(k[f.key]).slice(-4)}` : '') : k[f.key] || ''
+        const env = opts.messaging?.[ch]
+        out[ch] = { hints, configured: ch === 'whatsapp' ? !!(k.token && k.phoneNumberId) : !!(k.apiKey && k.senderId), fromServer: !!env && Object.values(env).some(Boolean) }
+      }
+      return out
+    },
+    'PUT messaging/settings': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const b = obj(req.body)
+      const ch = str(b.channel) as MessageChannel
+      if (ch !== 'whatsapp' && ch !== 'sms') throw bad('Which channel?')
+      const key = `messaging:${ctx.acc.tenantId}:${ch}`
+      const cur = (await store.get<MessagingKeys>(key)) || {}
+      const values = obj(b.values)
+      const next: MessagingKeys = {}
+      // an empty box keeps what was saved; `clear` removes everything for this channel
+      if (!b.clear) for (const f of MESSAGING_FIELDS[ch]) next[f.key] = str(values[f.key]).trim() || cur[f.key] || ''
+      await store.set(key, next)
+      await store.audit(`messaging ${ch} keys ${b.clear ? 'removed' : 'saved'} for ${ctx.acc.tenantId}`)
+      return { ok: true }
+    },
+    'POST messaging/send': async (req) => {
+      const ctx = await auth(req)
+      needEditor(ctx)
+      const b = obj(req.body)
+      const ch = str(b.channel) as MessageChannel
+      if (ch !== 'whatsapp' && ch !== 'sms') throw bad('Which channel?')
+      const test = !!ctx.tenant.db.company.messaging?.testMode || b.test === true
+      try {
+        return { id: await sendMessage(ch, { ...(await msgKeys(ctx, ch)), test }, str(b.to), str(b.text)) }
+      } catch (e) {
+        if (e instanceof MessagingError) throw new ApiFailure(502, e.message)
+        throw e
+      }
     },
 
     'POST users': async (req) => {

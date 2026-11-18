@@ -1,3 +1,4 @@
+import { AutoReminders } from '@/features/messages/AutoReminders'
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type LazyExoticComponent } from 'react'
 import type { PageId } from '@shared/domain'
 import { POWERED_BY } from '@/config/brand'
@@ -92,6 +93,7 @@ export function Shell() {
         </div>
       </header>
 
+      <AutoReminders />
       <main className="main">
         <div className={cls('page', nav.motion, readonly && 'readonly')} key={pageKey}>
           {readonly && <div className="view-only" role="note">View only. Your role cannot make changes on this screen.</div>}

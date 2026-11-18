@@ -1,10 +1,12 @@
 import { byId, dealerLedger, num, receivables, tk, todayISO } from '@shared/domain'
 import { MethodSelect } from '@/components/MethodSelect'
 import { useBooks } from '@/core/store/context'
+import { useMessaging, vars } from '@/features/messages/useMessaging'
 import { Field, FormSheet, useForm, useToast } from '@/ui'
 
 /** Take money from a dealer against what they owe. */
 export function CollectSheet({ dealerId }: { dealerId?: string }) {
+  const msg = useMessaging()
   const { db, act } = useBooks()
   const toast = useToast()
   const [v, set, bind, nbind] = useForm(() => {
@@ -22,6 +24,8 @@ export function CollectSheet({ dealerId }: { dealerId?: string }) {
         if (amount > led.due) return `That is more than the ${tk(led.due)} this dealer owes.`
         act('collect', { dealerId: v.dealerId, invoiceId: v.invoiceId, amount, method: v.method, collectedBy: v.collectedBy, date: v.date })
         toast(`${tk(amount)} collected from ${led.dealer.name}`)
+        // the receipt message, when set to go by itself; the books do not show this payment yet
+        void msg.auto('payment', v.dealerId, vars.payment(db, v.dealerId, amount, v.date, amount), v.invoiceId)
       }}>
       <Field label="Dealer">
         <select className="in" value={v.dealerId} onChange={(e) => {
