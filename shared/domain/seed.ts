@@ -2,6 +2,7 @@ import { applyBusinessTypes, TRANSPORT_HEAD, WAREHOUSE_PLACE } from './catalog'
 import { cashForDay } from './calc/cashbook'
 import { stockHistory } from './calc/products'
 import { sampleParcels } from './sampleParcels'
+import { addSampleDelivery } from './sampleDelivery'
 import { addDays, addMonths, daysBetween, parse, todayISO } from './format'
 import { defaultRoles } from './permissions'
 import type {
@@ -199,6 +200,13 @@ export function demoDb(): Db {
     d4: ['Aminul Haque', '01672-440913', 'Patiya Sadar Road'],
   }
   for (const x of db.dealers) if (contacts[x.id]) Object.assign(x, { owner: contacts[x.id][0], phone: contacts[x.id][1], address: contacts[x.id][2] })
+  const phones: Record<string, [string, string]> = {
+    s1: ['Kamrul Hasan', '01713-405566'], s2: ['Jahangir Alam', '01817-229034'], s3: ['Faruk Ahmed', '01911-760143'],
+    f1: ['Mizanur Rahman', '01715-338890'], f2: ['Delwar Hossain', '01819-447712'], f3: ['Shahidul Islam', '01712-905521'],
+  }
+  for (const x of [...db.suppliers, ...db.factories]) if (phones[x.id] && !x.phone) Object.assign(x, { contact: phones[x.id][0], phone: phones[x.id][1] })
+  const staffPhones: Record<string, string> = { e1: '01711-120034', e2: '01811-450672', e4: '01712-660981', e5: '01913-284415' }
+  for (const e of db.employees) if (staffPhones[e.id] && !e.phone) e.phone = staffPhones[e.id]
 
   const line = (productId: string, qty: number): InvoiceLine => {
     const p = db.products.find((x) => x.id === productId) as Product
@@ -466,6 +474,9 @@ function addDeliveryAndMessages(db: Db, today: ISODate, tick: () => number) {
     { id: 'QT-102', ts: tick(), date: d(2), dealerId: 'd1', soldBy: 'e4', terms: 'credit', lines: [line('pouch', 300), line('jar', 40)], discount: 0, validUntil: d(-5), note: '', status: 'sent', sentOn: d(2) },
     { id: 'QT-101', ts: tick(), date: d(5), dealerId: 'd2', soldBy: 'e4', terms: 'credit', lines: [line('coil', 25)], discount: 1000, validUntil: d(-2), note: 'Winter season price.', status: 'approved', sentOn: d(5), answeredOn: d(4), answer: 'Confirmed on phone' },
   ]
+
+  // the sample bills, deliveries and returns, as any company can load them
+  addSampleDelivery(db, today, tick)
 
   db.company.messaging = {
     whatsapp: 'link', sms: 'gateway', testMode: true, reminderDays: 3, templates: {},

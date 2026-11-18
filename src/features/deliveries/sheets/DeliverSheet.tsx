@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { byId, fmt, invoiceDelivery, num, todayISO, type DeliveryVia } from '@shared/domain'
 import { useBooks } from '@/core/store/context'
 import { useMessaging, vars } from '@/features/messages/useMessaging'
-import { Field, FormSheet, useForm, useToast } from '@/ui'
+import { Button, Field, FormSheet, useForm, useToast } from '@/ui'
 
 const VIA: Record<DeliveryVia, string> = { own: 'Our vehicle', courier: 'Courier', hired: 'Hired transport', pickup: 'Dealer collected it' }
 
@@ -13,8 +13,10 @@ export function DeliverSheet({ invoiceId, tripId, receivedBy = '' }: { invoiceId
   const msg = useMessaging()
   const inv = byId(db.invoices, invoiceId)
   const d = inv ? invoiceDelivery(db, inv) : null
-  // each line starts at what is still to go, so delivering everything is one tap
-  const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries((d?.lines || []).map((l) => [l.productId, String(l.remaining)])))
+  const stockOf = (id: string) => byId(db.products, id)?.stock ?? 0
+  // each line starts at what can go now: what is left on the bill, but no more than the warehouse holds
+  const canGo = (l: { productId: string; remaining: number }) => Math.max(Math.min(l.remaining, stockOf(l.productId)), 0)
+  const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries((d?.lines || []).map((l) => [l.productId, String(canGo(l))])))
   const [v, , bind] = useForm({ date: todayISO(), via: 'own' as DeliveryVia, receivedBy, note: '', notify: (msg.settings.auto.delivery || []).length > 0 ? 'yes' : 'no' })
   if (!inv || !d) return null
   const dealer = byId(db.dealers, inv.dealerId)
@@ -33,21 +35,35 @@ export function DeliverSheet({ invoiceId, tripId, receivedBy = '' }: { invoiceId
         }
         if (!total) return 'Enter what is going now.'
         const lines = going.filter((l) => l.now > 0).map((l) => ({ productId: l.productId, qty: l.now }))
-        act('recordDelivery', { invoiceId: inv.id, date: v.date || todayISO(), lines, via: v.via, tripId, receivedBy: v.receivedBy.trim(), note: v.note.trim() })
+        const refused = act('recordDelivery', { invoiceId: inv.id, date: v.date || todayISO(), lines, via: v.via, tripId, receivedBy: v.receivedBy.trim(), note: v.note.trim() })
+        if (refused) return refused
         toast(total < d.remainingUnits ? `Part delivered: ${fmt(total)} of ${fmt(d.remainingUnits)} units` : `${inv.id} delivered in full`)
         if (v.notify === 'yes') void msg.auto('delivery', inv.dealerId, vars.delivery(db, inv, lines, v.receivedBy.trim()), inv.id)
       }}>
       <div className="field wide">
         <span className="field-label">What goes now</span>
-        <div className="deliver-lines">
-          {d.lines.map((l) => (
-            <div key={l.productId} className="deliver-line">
-              <span className="two-line"><b>{l.name}</b><small className="t-muted">Billed {fmt(l.ordered)} · delivered {fmt(l.delivered)} · <b>{fmt(l.remaining)} left</b> {l.unit}</small></span>
-              <input className="in" inputMode="decimal" value={qty[l.productId] ?? ''} disabled={!l.remaining} aria-label={`${l.name} to deliver`}
-                onChange={(e) => setQty({ ...qty, [l.productId]: e.target.value })} />
-            </div>
-          ))}
+        <div className="btn-row tight-row">
+          <Button size="sm" variant="secondary" onClick={() => setQty(Object.fromEntries(d.lines.map((l) => [l.productId, String(canGo(l))])))}>Deliver all that can go</Button>
+          <Button size="sm" variant="secondary" onClick={() => setQty(Object.fromEntries(d.lines.map((l) => [l.productId, '0'])))}>Clear</Button>
         </div>
+        <div className="deliver-lines">
+          {d.lines.map((l) => {
+            const short = l.remaining > stockOf(l.productId)
+            return (
+              <div key={l.productId} className={'deliver-line' + (l.remaining ? '' : ' done')}>
+                <span className="two-line">
+                  <b>{l.name}</b>
+                  <small className="t-muted">Billed {fmt(l.ordered)} · delivered {fmt(l.delivered)}{l.cancelled ? ` · closed ${fmt(l.cancelled)}` : ''} · <b>{fmt(l.remaining)} left</b> {l.unit}</small>
+                  {l.remaining > 0 && <small className={short ? 't-warn' : 't-muted'}>{fmt(stockOf(l.productId))} {l.unit} in the warehouse{short ? ' · not enough for all of it' : ''}</small>}
+                </span>
+                {l.remaining ? (
+                  <input className="in" inputMode="decimal" value={qty[l.productId] ?? ''} aria-label={`${l.name} to deliver`} onChange={(e) => setQty({ ...qty, [l.productId]: e.target.value })} />
+                ) : <span className="t-good deliver-done">Done</span>}
+              </div>
+            )
+          })}
+        </div>
+        {total > 0 && total < d.remainingUnits && <small>Part delivery: {fmt(total)} of {fmt(d.remainingUnits)} units go now; {fmt(d.remainingUnits - total)} stay pending on this bill.</small>}
       </div>
       <Field label="Delivered on"><input type="date" {...bind('date')} /></Field>
       <Field label="How it went"><select {...bind('via')}>{Object.entries(VIA).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>

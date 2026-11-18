@@ -168,16 +168,17 @@ export const stockHistory = (db: Db, productId: string): { moves: StockMove[]; o
     }
     for (const inv of db.invoices) {
       // invoices that wait for delivery move stock when the goods go, below
-      if (inv.status !== 'final' || inv.stockOnDelivery) continue
+      if (inv.status !== 'final' || inv.stockOnDelivery || inv.sample) continue
       const qty = sum(inv.lines.filter((l) => l.productId === productId), (l) => l.qty)
       add(inv.id, inv.date, inv.ts, `Sold to ${byId(db.dealers, inv.dealerId)?.name || 'dealer'}`, inv.id, -qty)
     }
     for (const dv of db.deliveries || []) {
+      if (dv.cancelled || dv.sample) continue
       const qty = sum(dv.lines.filter((l) => l.productId === productId), (l) => l.qty)
       add(dv.id, dv.date, dv.ts, `Delivered to ${byId(db.dealers, dv.dealerId)?.name || 'dealer'}`, dv.invoiceId, -qty)
     }
     for (const r of db.returns || []) {
-      if (r.condition !== 'restock') continue
+      if (r.condition !== 'restock' || r.sample) continue
       const qty = sum(r.lines.filter((l) => l.productId === productId), (l) => l.qty)
       add(r.id, r.date, r.ts, `Returned by ${byId(db.dealers, r.dealerId)?.name || 'dealer'}`, [r.invoiceId, r.reason].filter(Boolean).join(' · '), qty)
     }

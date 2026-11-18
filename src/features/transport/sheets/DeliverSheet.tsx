@@ -15,11 +15,12 @@ export function DeliverSheet({ tripId }: { tripId: string }) {
   return (
     <FormSheet title="Mark delivered" crumb={`Trip ${t.id}`} submit="Mark delivered"
       onSubmit={() => {
-        act('setTripStatus', { id: t.id, status: 'done', date: v.date || todayISO(), receivedBy: v.receivedBy.trim(), deliveryNote: v.note.trim() })
         // the bill's goods leave stock with the trip, unless they are recorded separately
         if (inv && left && left.remainingUnits > 0 && v.goods === 'all') {
-          act('recordDelivery', { invoiceId: inv.id, date: v.date || todayISO(), lines: left.lines.filter((l) => l.remaining > 0).map((l) => ({ productId: l.productId, qty: l.remaining })), via: 'own', tripId: t.id, receivedBy: v.receivedBy.trim(), note: v.note.trim() })
+          const refused = act('recordDelivery', { invoiceId: inv.id, date: v.date || todayISO(), lines: left.lines.filter((l) => l.remaining > 0).map((l) => ({ productId: l.productId, qty: l.remaining })), via: 'own', tripId: t.id, receivedBy: v.receivedBy.trim(), note: v.note.trim() })
+          if (refused) return `${refused}. Choose “Record the goods separately” to deliver part.`
         }
+        act('setTripStatus', { id: t.id, status: 'done', date: v.date || todayISO(), receivedBy: v.receivedBy.trim(), deliveryNote: v.note.trim() })
         toast(`${t.id} delivered`)
       }}>
       <Field label="Delivered on"><input type="date" {...bind('date')} /></Field>

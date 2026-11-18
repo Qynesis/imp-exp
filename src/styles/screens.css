@@ -205,3 +205,25 @@ textarea.in { min-height: 96px; padding: 10px 12px; resize: vertical; font: inhe
 .delivery-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .delivery-head b { display: inline-flex; align-items: center; gap: 6px; }
 .delivery-head .link { margin-left: auto; }
+.picked-contact, .contact-row, .contact-new { display: flex; align-items: center; gap: 12px; }
+.picked-contact { padding: 10px 12px; border: 1px solid #b9dccf; background: var(--brand-soft); border-radius: 12px; }
+.picked-contact .link { margin-left: auto; }
+.contact-avatar { flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--brand); color: #fff; font-weight: 600; }
+.contact-list { margin-top: 6px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; max-height: 340px; overflow-y: auto; background: var(--surface); }
+.contact-row { width: 100%; padding: 9px 12px; border: 0; border-top: 1px solid var(--line-soft); background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: background 0.15s; }
+.contact-row:first-child { border-top: 0; }
+.contact-row:hover, .contact-row:focus-visible { background: var(--fill); }
+.contact-row .pill { margin-left: auto; }
+.contact-new { padding: 10px 12px; background: var(--brand-soft); flex-wrap: wrap; }
+.contact-new .in { width: 180px; min-height: 36px; }
+.send-one .chip small { color: inherit; opacity: 0.75; font-weight: 400; }
+.deliver-line.done { opacity: 0.6; }
+.deliver-done { text-align: right; font-weight: 600; }
+.loading-list .row .amt small { display: block; font-weight: 400; }
+.delivery-trail { margin: 4px 0 10px; }
+.field.send-buttons, .send-buttons { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; }
+.send-buttons .btn { min-width: 140px; }
+.btn-wa { background: #1fa855; }
+.btn-wa:hover:not(:disabled) { background: #178a45; }
+.send-result { margin: 0; display: flex; align-items: center; gap: 6px; }
+@media (max-width: 719px) { .send-buttons .btn { flex: 1; } .send-buttons small { width: 100%; } }

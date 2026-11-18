@@ -60,12 +60,12 @@ export function useMessaging() {
   /** Which channels are switched on at all. */
   const channels: MessageChannel[] = [...(s.whatsapp !== 'off' ? ['whatsapp' as const] : []), ...(s.sms !== 'off' ? ['sms' as const] : [])]
 
-  async function send(kind: MessageKind, channel: MessageChannel, dealerId: string, text: string, ref = '', phone?: string): Promise<SendResult> {
+  async function send(kind: MessageKind, channel: MessageChannel, dealerId: string, text: string, ref = '', phone?: string, name?: string): Promise<SendResult> {
     const to = phone || byId(db.dealers, dealerId)?.phone || ''
-    const base = { date: todayISO(), kind, channel, to, dealerId, text, ref, test: s.testMode || undefined }
+    const base = { date: todayISO(), kind, channel, to, dealerId, text, ref, name: name || undefined, test: s.testMode || undefined }
     if (!to) {
       act('logMessage', { ...base, status: 'failed', error: 'No phone number' })
-      return { ok: false, text: `${byId(db.dealers, dealerId)?.name || 'Dealer'} has no phone number` }
+      return { ok: false, text: `${byId(db.dealers, dealerId)?.name || name || 'This contact'} has no phone number` }
     }
     // link mode: WhatsApp opens with the message typed in, a person presses send
     if (channel === 'whatsapp' && s.whatsapp === 'link' && !s.testMode) {

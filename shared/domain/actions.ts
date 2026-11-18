@@ -7,6 +7,7 @@ import { byId, mustFind } from './calc/common'
 import { emptyCustoms } from './calc/customs'
 import { productInUse } from './calc/products'
 import { sampleParcels } from './sampleParcels'
+import { addSampleDelivery, hasSampleDelivery, removeSampleDelivery } from './sampleDelivery'
 import { computeShipment } from './calc/shipments'
 import type {
   Advance, BusinessTypeId, Category, Collection, Company, CustomsInfo, CustomsStage, Dealer, Db, Direction, Employee, Expense, Factory,
@@ -305,12 +306,52 @@ export const actions = {
   recordDelivery(d: Db, p: Omit<Delivery, 'id' | 'ts' | 'dealerId'>) {
     deliver(d, p)
   },
+  /** Close what is left on a bill without delivering it; nothing leaves stock, and a credit can come off the dealer's due. */
+  closeRemainder(d: Db, p: { invoiceId: string; date: ISODate; credit: number; note: string }) {
+    const left = [...stillToGo(d, p.invoiceId).entries()].filter(([, q]) => q > 0)
+    if (!left.length) throw new Error('Nothing left to close')
+    deliver(d, { invoiceId: p.invoiceId, date: p.date, lines: left.map(([productId, qty]) => ({ productId, qty })), via: 'own', receivedBy: '', note: p.note, cancelled: true, credit: Math.max(p.credit, 0) || undefined })
+  },
+  /** Take back a delivery recorded by mistake: its goods return to stock and the bill waits again. */
+  undoDelivery(d: Db, id: string) {
+    const x = mustFind(d.deliveries || [], id, 'Delivery')
+    const inv = mustFind(d.invoices, x.invoiceId, 'Invoice')
+    if (!x.cancelled) {
+      // goods already returned on this bill cannot be un-delivered underneath the return
+      for (const l of x.lines) {
+        const out = (d.deliveries || []).filter((y) => y.invoiceId === inv.id && !y.cancelled).reduce((s, y) => s + y.lines.filter((z) => z.productId === l.productId).reduce((m, z) => m + z.qty, 0), 0)
+        const back = (d.returns || []).filter((r) => r.invoiceId === inv.id).reduce((s, r) => s + r.lines.filter((z) => z.productId === l.productId).reduce((m, z) => m + z.qty, 0), 0)
+        if (out - l.qty < back - 1e-9) throw new Error('Goods from this delivery were returned; undo the return first')
+      }
+      if (!inv.sample) for (const l of x.lines) mustFind(d.products, l.productId, 'Product').stock += l.qty
+    }
+    d.deliveries = (d.deliveries || []).filter((y) => y.id !== id)
+  },
+  /** Sample bills, deliveries and returns to try the delivery section with. They never touch stock or money. */
+  loadSampleDelivery(d: Db, p: { today: ISODate }) {
+    if (hasSampleDelivery(d)) throw new Error('Sample data is already loaded')
+    addSampleDelivery(d, p.today, () => tick(d))
+  },
+  removeSampleDelivery(d: Db, _: Record<string, never>) {
+    removeSampleDelivery(d)
+  },
   /** Goods coming back from a dealer: good ones go back into stock, and the credit comes off what they owe. */
   recordReturn(d: Db, p: Omit<SalesReturn, 'id' | 'ts'>) {
     const lines = p.lines.filter((l) => l.qty > 0)
     if (!lines.length) throw new Error('Nothing returned')
-    if (p.condition === 'restock') for (const l of lines) mustFind(d.products, l.productId, 'Product').stock += l.qty
-    ;(d.returns ??= []).push({ ...p, lines, id: uid(d, 'RT-'), ts: tick(d) })
+    const inv = mustFind(d.invoices, p.invoiceId, 'Invoice')
+    if (inv.dealerId !== p.dealerId) throw new Error('That bill belongs to another dealer')
+    // only what actually went out can come back
+    for (const l of lines) {
+      const billed = inv.lines.filter((x) => x.productId === l.productId).reduce((s, x) => s + x.qty, 0)
+      const out = inv.stockOnDelivery
+        ? (d.deliveries || []).filter((x) => x.invoiceId === inv.id && !x.cancelled).reduce((s, x) => s + x.lines.filter((y) => y.productId === l.productId).reduce((m, y) => m + y.qty, 0), 0)
+        : billed
+      const back = (d.returns || []).filter((r) => r.invoiceId === inv.id).reduce((s, r) => s + r.lines.filter((y) => y.productId === l.productId).reduce((m, y) => m + y.qty, 0), 0)
+      if (l.qty > out - back + 1e-9) throw new Error(`Only ${out - back} of that item can come back on ${inv.id}`)
+    }
+    if (p.condition === 'restock' && !inv.sample) for (const l of lines) mustFind(d.products, l.productId, 'Product').stock += l.qty
+    ;(d.returns ??= []).push({ ...p, lines, id: uid(d, 'RT-'), ts: tick(d), sample: inv.sample || undefined })
   },
   /** A new dealer estimate, or changes to one not yet billed. A changed estimate has to be approved again. */
   saveQuote(d: Db, p: Omit<SalesQuote, 'id' | 'ts' | 'status'> & { id?: string }) {
@@ -435,12 +476,34 @@ export const actions = {
   },
 } satisfies Record<string, (d: Db, payload: never) => void>
 
+/** How much of each product on a bill is still to go: billed less delivered and closed. */
+function stillToGo(d: Db, invoiceId: string): Map<string, number> {
+  const inv = mustFind(d.invoices, invoiceId, 'Invoice')
+  const left = new Map<string, number>()
+  for (const l of inv.lines) left.set(l.productId, (left.get(l.productId) || 0) + l.qty)
+  for (const x of (d.deliveries || []).filter((x) => x.invoiceId === invoiceId)) for (const l of x.lines) left.set(l.productId, (left.get(l.productId) || 0) - l.qty)
+  return left
+}
+
+/**
+ * Goods leaving against a bill, or (cancelled) the rest of a bill closed without going. The books
+ * refuse more than is still to go, and more than the warehouse holds, whoever asks.
+ */
 function deliver(d: Db, p: Omit<Delivery, 'id' | 'ts' | 'dealerId'>) {
   const inv = mustFind(d.invoices, p.invoiceId, 'Invoice')
+  if (inv.status !== 'final' || !inv.stockOnDelivery) throw new Error('This bill does not wait for delivery')
   const lines = p.lines.filter((l) => l.qty > 0)
   if (!lines.length) throw new Error('Nothing delivered')
-  for (const l of lines) mustFind(d.products, l.productId, 'Product').stock -= l.qty
-  ;(d.deliveries ??= []).push({ ...p, lines, dealerId: inv.dealerId, id: uid(d, 'DL-'), ts: tick(d) })
+  const left = stillToGo(d, inv.id)
+  for (const l of lines) {
+    const prod = mustFind(d.products, l.productId, 'Product')
+    if (!left.has(l.productId)) throw new Error(`${prod.name} is not on bill ${inv.id}`)
+    if (l.qty > (left.get(l.productId) || 0) + 1e-9) throw new Error(`Only ${left.get(l.productId)} ${prod.unit} of ${prod.name} is left on ${inv.id}`)
+    if (!p.cancelled && !inv.sample && l.qty > prod.stock + 1e-9) throw new Error(`Only ${prod.stock} ${prod.unit} of ${prod.name} in the warehouse`)
+  }
+  // sample bills only show how delivery works; they never touch real stock
+  if (!p.cancelled && !inv.sample) for (const l of lines) mustFind(d.products, l.productId, 'Product').stock -= l.qty
+  ;(d.deliveries ??= []).push({ ...p, lines, dealerId: inv.dealerId, id: uid(d, p.cancelled ? 'CL-' : 'DL-'), ts: tick(d), sample: inv.sample || undefined })
 }
 
 function addTransportExpense(d: Db, p: { date: ISODate; amount: number; method: string; details: string; link: TransportLink }) {

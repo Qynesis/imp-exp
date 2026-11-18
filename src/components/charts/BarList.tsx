@@ -9,8 +9,8 @@ export interface BarRow {
   note?: string
 }
 
-/** Ranked list with a thin bar under each name, sized against the largest. */
-export function BarList({ rows, format, limit = 6, empty }: { rows: BarRow[]; format: (n: number) => string; limit?: number; empty: string }) {
+/** Ranked list with a thin bar under each name, sized against the largest. `share` names what the percentages are of. */
+export function BarList({ rows, format, limit = 6, empty, share = 'of sales' }: { rows: BarRow[]; format: (n: number) => string; limit?: number; empty: string; share?: string }) {
   const shown = rows.slice(0, limit)
   const max = Math.max(...shown.map((r) => r.value), 0)
   const total = rows.reduce((s, r) => s + r.value, 0)
@@ -25,7 +25,7 @@ export function BarList({ rows, format, limit = 6, empty }: { rows: BarRow[]; fo
           </div>
           <div className="bar-track"><span style={{ width: `${max > 0 ? Math.max((r.value / max) * 100, 1.5) : 0}%`, background: SERIES.sales }} /></div>
           <div className="bar-foot">
-            <small>{total > 0 ? `${Math.round((r.value / total) * 100)}% of sales` : ''}</small>
+            <small>{total > 0 ? `${Math.round((r.value / total) * 100)}% ${share}` : ''}</small>
             {r.note && <small>{r.note}</small>}
           </div>
         </li>

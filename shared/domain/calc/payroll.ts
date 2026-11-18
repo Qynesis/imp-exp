@@ -32,7 +32,7 @@ export const payrollFor = (db: Db, month: MonthKey) =>
       return { e, salary: e.salary, advance, paid, toPay: Math.max(e.salary - advance - paid, 0) }
     })
     const sales: SalesRow[] = db.employees.filter((e) => e.payType === 'sales').map((e) => {
-      const invs = db.invoices.filter((i) => i.status === 'final' && i.soldBy === e.id && inMonth(i))
+      const invs = db.invoices.filter((i) => i.status === 'final' && !i.sample && i.soldBy === e.id && inMonth(i))
       const sold = sum(invs, invTotal)
       const collected = sum(invs, (i) => i.received || 0) + sum(db.collections.filter((c) => c.collectedBy === e.id && inMonth(c)), (c) => c.amount)
       const commission = Math.round(((e.commissionOn === 'collection' ? collected : sold) * (e.rate || 0)) / 100)

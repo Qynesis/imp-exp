@@ -28,7 +28,8 @@ export function ReturnSheet({ invoiceId, dealerId }: { invoiceId?: string; deale
         const back = lines.filter((l) => num(qty[l.productId]) > 0).map((l) => ({ productId: l.productId, qty: num(qty[l.productId]), price: l.price }))
         if (!back.length) return 'Enter how much came back.'
         if (!v.reason) return 'Say why the goods came back.'
-        act('recordReturn', { date: v.date || todayISO(), invoiceId: inv.id, dealerId: inv.dealerId, lines: back, condition: v.condition, credit: Math.max(credit, 0), reason: v.reason, note: v.note.trim() })
+        const refused = act('recordReturn', { date: v.date || todayISO(), invoiceId: inv.id, dealerId: inv.dealerId, lines: back, condition: v.condition, credit: Math.max(credit, 0), reason: v.reason, note: v.note.trim() })
+        if (refused) return refused
         toast(`Return saved${credit > 0 ? ` · ${tk(credit)} credited` : ''}`)
       }}>
       <Field label="Dealer">

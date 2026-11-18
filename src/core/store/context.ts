@@ -13,8 +13,8 @@ export interface StoreValue {
   /** A message for the person, shown once as a toast. */
   notice: string
   clearNotice(): void
-  /** Change the books. Applies on screen at once and is saved in the background. */
-  act<K extends ActionName>(name: K, payload: ActionPayload<K>): void
+  /** Change the books. Applies on screen at once and is saved in the background. Returns why it was refused, or null. */
+  act<K extends ActionName>(name: K, payload: ActionPayload<K>): string | null
   signIn(path: 'login', body: LoginRequest): Promise<void>
   signIn(path: 'signup', body: SignupRequest): Promise<void>
   signOut(): void

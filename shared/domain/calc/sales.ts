@@ -26,7 +26,8 @@ export interface SaleFact {
 export const saleFacts = (db: Db): SaleFact[] =>
   memo(db, 'saleFacts', () =>
     db.invoices
-      .filter((i) => i.status === 'final')
+      // sample bills only demonstrate the delivery section; they are not sales
+      .filter((i) => i.status === 'final' && !i.sample)
       .map((i): SaleFact => {
         const sub = sum(i.lines, (l) => l.qty * l.price)
         // spread the discount over the lines in proportion, so product totals add up to the invoice
@@ -45,7 +46,7 @@ export const saleFacts = (db: Db): SaleFact[] =>
 /** Money received from dealers by date: paid on the invoice, plus later collections. */
 const receipts = (db: Db) =>
   memo(db, 'saleReceipts', () => [
-    ...db.invoices.filter((i) => i.status === 'final' && i.received > 0).map((i) => ({ date: i.date, amount: i.received })),
+    ...db.invoices.filter((i) => i.status === 'final' && !i.sample && i.received > 0).map((i) => ({ date: i.date, amount: i.received })),
     ...db.collections.map((c) => ({ date: c.date, amount: c.amount })),
   ])
 

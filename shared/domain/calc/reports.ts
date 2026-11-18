@@ -6,7 +6,7 @@ import { shipmentCalc } from './shipments'
 
 export const profitAndLoss = (db: Db, month: MonthKey) =>
   memo(db, 'pnl:' + month, () => {
-    const invs = db.invoices.filter((i) => i.status === 'final' && i.date.slice(0, 7) === month)
+    const invs = db.invoices.filter((i) => i.status === 'final' && !i.sample && i.date.slice(0, 7) === month)
     const sales = sum(invs, invTotal)
     const cogs = sum(invs, (i) => sum(i.lines, (l) => l.qty * (l.cost || 0)))
     const pr = payrollFor(db, month)

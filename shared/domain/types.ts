@@ -353,6 +353,8 @@ export interface Dealer {
   salesId: string
   /** Goods go to this dealer by courier; with auto-booking on, a parcel is booked when a sale is saved. */
   courier?: boolean
+  /** The made-up dealer that sample bills belong to. */
+  sample?: boolean
   custom?: CustomValues
 }
 
@@ -382,6 +384,8 @@ export interface Invoice extends Dated {
   stockOnDelivery?: boolean
   /** The estimate this invoice was made from. */
   quoteId?: string
+  /** Sample data for trying the delivery section: never moves stock, never counts in sales or money. */
+  sample?: boolean
 }
 
 /* ---------- delivery, returns, estimates to dealers ---------- */
@@ -401,6 +405,14 @@ export interface Delivery extends Dated {
   parcelId?: string
   receivedBy: string
   note: string
+  /**
+   * Closes the rest of the bill without delivering it (the dealer no longer wants it). These lines
+   * never leave the warehouse; `credit` comes off what the dealer owes.
+   */
+  cancelled?: boolean
+  credit?: number
+  /** Part of the sample data: never moves stock. */
+  sample?: boolean
 }
 export type ReturnCondition = 'restock' | 'damaged'
 /** Goods a dealer sent back. Good goods go back into stock; the credit comes off what the dealer owes. */
@@ -414,6 +426,8 @@ export interface SalesReturn extends Dated {
   credit: number
   reason: string
   note: string
+  /** Part of the sample data: never moves stock. */
+  sample?: boolean
 }
 export type QuoteStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'invoiced'
 /** A price estimate for a dealer, approved before it becomes an invoice. */
@@ -448,6 +462,8 @@ export interface MessageLog extends Dated {
   error?: string
   /** Invoice, estimate or collection it is about. */
   ref?: string
+  /** Who it went to, for people who are not dealers (suppliers, staff, a typed number). */
+  name?: string
   /** Sent in test mode: nothing left the app. */
   test?: boolean
 }

@@ -82,26 +82,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     pushRef.current = () => void push()
   }, [push])
 
-  const act = useCallback(<K extends ActionName>(name: K, payload: ActionPayload<K>) => {
+  const act = useCallback(<K extends ActionName>(name: K, payload: ActionPayload<K>): string | null => {
     if (accessGuard.readonly) {
       setNotice('Your role can only view this screen.')
-      return
+      return 'Your role can only view this screen.'
     }
     const cur = ref.current.db
-    if (!cur) return
+    if (!cur) return 'Not signed in.'
     let next: Db
     try {
       next = applyAction(cur, name, payload)
     } catch (e) {
+      // the books refuse with a reason a person can act on, e.g. "Only 70 cartons left on INV-2312"
+      const why = e instanceof Error && e.message ? e.message : 'That change could not be made. Reload and try again.'
       console.error(e)
-      setNotice('That change could not be made. Reload and try again.')
-      return
+      setNotice(why)
+      return why
     }
     ref.current.db = next
     ref.current.dirty = true
     setSt((s) => ({ ...s, db: next }))
     clearTimeout(ref.current.timer)
     ref.current.timer = setTimeout(() => pushRef.current(), SAVE_DELAY_MS)
+    return null
   }, [])
 
   useEffect(() => {

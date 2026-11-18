@@ -293,7 +293,7 @@ export default function SellPage({ params }: FeatureRouteProps) {
           onRow={openInvoice}
           empty="No invoices yet."
           columns={[
-            { label: 'Invoice', primary: true, render: (r) => (r.status === 'draft' ? 'Draft' : r.id) },
+            { label: 'Invoice', primary: true, render: (r) => (r.status === 'draft' ? 'Draft' : <>{r.id}{r.sample && <span className="test-tag">sample</span>}</>) },
             { label: 'Dealer', render: (r) => byId(db.dealers, r.dealerId)?.name },
             { label: 'Date', render: (r) => fdate(r.date) },
             { label: 'Sold by', render: (r) => byId(db.employees, r.soldBy)?.name || 'Office sale' },

@@ -22,6 +22,7 @@ export const cashEntries = (db: Db): CashEntry[] =>
     const name = <T extends { id: string; name: string }>(list: T[], id: string, fallback: string) => byId(list, id)?.name || fallback
 
     for (const i of db.invoices) {
+      if (i.sample) continue
       if (i.status !== 'final' || !(i.received > 0)) continue
       const part = i.received < invTotal(i)
       push(i.date, i.ts, `${name(db.dealers, i.dealerId, 'Dealer')} · ${part ? 'part payment' : 'payment'} on ${i.id}`, 'Sales', i.received, 0, i.method)

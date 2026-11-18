@@ -196,7 +196,7 @@ export default function SalesAnalyticsPage() {
         <div className="card-body pt0 tools-row">
           <select className="in narrow-select" value={dealer} onChange={(e) => setDealer(e.target.value)} aria-label="Dealer">
             <option value="">All dealers</option>
-            {db.dealers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            {db.dealers.filter((d) => !d.sample).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
           <select className="in narrow-select" value={person} onChange={(e) => setPerson(e.target.value)} aria-label="Salesperson">
             <option value="">All salespeople</option>

@@ -29,7 +29,7 @@ export default function DealersPage() {
             columns={[
               { label: 'Dealer', primary: true, render: (r) => (
                 <span className="two-line">
-                  <b>{r.dealer.name}</b>
+                  <b>{r.dealer.name}{r.dealer.sample && <span className="test-tag">sample</span>}</b>
                   <small>{byId(db.employees, r.dealer.salesId) ? `Sales: ${byId(db.employees, r.dealer.salesId)?.name}` : 'Office sale'}</small>
                 </span>
               ) },

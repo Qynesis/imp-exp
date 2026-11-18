@@ -1,7 +1,9 @@
-import { byId, fmt, invoiceDelivery, TRIP_STATUS, trips } from '@shared/domain'
+import { byId, fdate, fmt, invoiceDelivery, TRIP_STATUS, trips } from '@shared/domain'
 import { accessGuard, useBooks } from '@/core/store/context'
 import { BookCourierSheet } from '@/features/courier/BookCourierSheet'
 import { ParcelDetailSheet } from '@/features/courier/ParcelDetailSheet'
+import { DeliveryChallan } from '@/features/deliveries/DeliveryChallan'
+import { CloseRestSheet } from '@/features/deliveries/sheets/CloseRestSheet'
 import { DeliverSheet } from '@/features/deliveries/sheets/DeliverSheet'
 import { ReturnSheet } from '@/features/deliveries/sheets/ReturnSheet'
 import { useMessaging, vars } from '@/features/messages/useMessaging'
@@ -48,17 +50,27 @@ export const ViewInvoiceSheet: SheetComponent<{ invoiceId: string }> = ({ invoic
           <div className="delivery-head">
             <b><Icon name="truck" size={16} /> Delivery</b>
             <Pill tone={dl.status === 'delivered' ? 'good' : dl.status === 'partial' ? 'info' : 'warn'}>{dl.status === 'delivered' ? 'Delivered in full' : dl.status === 'partial' ? 'Part delivered' : 'Waiting for delivery'}</Pill>
+            {canEdit && dl.remainingUnits > 0 && <button type="button" className="link" onClick={() => sheets.open(CloseRestSheet, { invoiceId: inv.id })}>Close the rest</button>}
             {canEdit && dl.lines.some((l) => l.returnable > 0) && <button type="button" className="link" onClick={() => sheets.open(ReturnSheet, { invoiceId: inv.id })}>Record a return</button>}
           </div>
           <div className="rows flush">
             {dl.lines.map((l) => (
               <div key={l.productId} className="row">
                 <span className="name normal">{l.name}</span>
-                <span className="meta">{fmt(l.delivered)} of {fmt(l.ordered)} delivered{l.returned ? ` · ${fmt(l.returned)} returned` : ''}</span>
+                <span className="meta">{fmt(l.delivered)} of {fmt(l.ordered)} delivered{l.cancelled ? ` · ${fmt(l.cancelled)} closed` : ''}{l.returned ? ` · ${fmt(l.returned)} returned` : ''}</span>
                 <span className={l.remaining ? 'amt t-warn' : 'amt t-good'}>{l.remaining ? `${fmt(l.remaining)} ${l.unit} to go` : 'Done'}</span>
               </div>
             ))}
           </div>
+          {(db.deliveries || []).some((x) => x.invoiceId === inv.id && !x.cancelled) && (
+            <div className="chips delivery-trail">
+              {(db.deliveries || []).filter((x) => x.invoiceId === inv.id && !x.cancelled).map((x) => (
+                <button key={x.id} type="button" className="chip" title="Print this delivery's challan" onClick={() => print(<DeliveryChallan db={db} x={x} />)}>
+                  {fdate(x.date)} · {x.lines.reduce((s, l) => s + l.qty, 0)} units · challan
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       <div className="invoice-wrap"><InvoiceDoc db={db} inv={inv} /></div>

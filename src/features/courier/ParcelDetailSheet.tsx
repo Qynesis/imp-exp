@@ -4,6 +4,7 @@ import { courierLabel } from '@shared/courier'
 import { PhoneLink } from '@/components/PhoneLink'
 import { ApiError } from '@/core/api/client'
 import { accessGuard, useBooks } from '@/core/store/context'
+import { SendMessageSheet } from '@/features/messages/SendMessageSheet'
 import { ViewInvoiceSheet } from '@/features/sales/sheets/ViewInvoiceSheet'
 import { Button, Icon, Pill, Sheet, useSheets, useToast, type SheetComponent } from '@/ui'
 import { isDone, parcelStatusText, parcelTone } from './parcelTone'
@@ -38,6 +39,7 @@ export const ParcelDetailSheet: SheetComponent<{ parcelId: string }> = ({ parcel
     <Sheet title={`Parcel ${p.consignmentId}`} crumb={courierLabel(p.provider)} wide
       footer={
         <>
+          <Button variant="secondary" icon="send" onClick={() => sheets.open(SendMessageSheet, { contactKey: p.dealerId ? 'd:' + p.dealerId : 'p:' + p.id })}>Message</Button>
           {p.invoiceId && <Button variant="secondary" icon="receipt" onClick={() => sheets.open(ViewInvoiceSheet, { invoiceId: p.invoiceId })}>Invoice {p.invoiceId}</Button>}
           {p.trackingUrl && <Button variant="secondary" icon="route" onClick={() => window.open(p.trackingUrl, '_blank', 'noopener')}>Track</Button>}
           {p.provider === 'manual' && !isDone(p.status) && canEdit && (

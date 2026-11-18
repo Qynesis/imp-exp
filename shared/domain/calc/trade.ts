@@ -102,7 +102,7 @@ export const orderBook = (db: Db): OrderBook =>
       return { orders: x.invoices, value: x.sales }
     }
     // bills whose goods have not all gone yet, from the delivery section
-    const toDeliver = pendingDeliveries(db).map((x) => ({ id: x.inv.id, dealerId: x.inv.dealerId, date: x.inv.date, total: sum(x.inv.lines, (l) => l.qty * l.price) - (x.inv.discount || 0), units: x.d.remainingUnits, partial: x.d.status === 'partial' }))
+    const toDeliver = pendingDeliveries(db).filter((x) => !x.inv.sample).map((x) => ({ id: x.inv.id, dealerId: x.inv.dealerId, date: x.inv.date, total: sum(x.inv.lines, (l) => l.qty * l.price) - (x.inv.discount || 0), units: x.d.remainingUnits, partial: x.d.status === 'partial' }))
     return {
       today: day(t), yesterday: day(y), month: { orders: m.invoices, value: m.sales, profit: m.profit }, target: db.company.salesTarget || 0,
       toDeliver, onTheRoad: trips(db).filter((x) => x.status === 'on-the-way').length,

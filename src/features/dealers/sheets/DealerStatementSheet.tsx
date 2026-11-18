@@ -4,6 +4,7 @@ import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
 import { ViewInvoiceSheet } from '@/features/sales/sheets/ViewInvoiceSheet'
 import { Button, Sheet, useSheetItem, useSheets, type SheetComponent } from '@/ui'
+import { SendMessageSheet } from '@/features/messages/SendMessageSheet'
 import { CollectSheet } from './CollectSheet'
 import { DealerSheet } from './DealerSheet'
 
@@ -21,6 +22,7 @@ export const DealerStatementSheet: SheetComponent<{ dealerId: string }> = ({ dea
       footer={
         <>
           <Button icon="edit" variant="secondary" onClick={() => sheets.open(DealerSheet, { dealerId })}>Edit</Button>
+          <Button icon="send" variant="secondary" disabled={!d.phone} onClick={() => sheets.open(SendMessageSheet, { contactKey: 'd:' + dealerId })}>Message</Button>
           <Button icon="plus" variant="secondary" onClick={() => { close(); go('sell/new/' + dealerId) }}>New sale</Button>
           <Button icon="wallet" disabled={led.due <= 0} onClick={() => sheets.open(CollectSheet, { dealerId })}>Collect</Button>
         </>

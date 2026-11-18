@@ -1,168 +1,46 @@
 import { useEffect, useState } from 'react'
-import { byId, dealerLedger, fshort, isAdmin, receivables, tk, todayISO, type MessageChannel, type MessageKind, type MessagingSettings } from '@shared/domain'
-import { DEFAULT_TEMPLATES, MESSAGE_KINDS, MESSAGING_FIELDS, PLACEHOLDERS, renderTemplate, type MessagingKeyName } from '@shared/messaging'
+import { byId, fshort, isAdmin, type MessageChannel, type MessageKind, type MessagingSettings } from '@shared/domain'
+import { DEFAULT_TEMPLATES, MESSAGE_KINDS, MESSAGING_FIELDS, PLACEHOLDERS, type MessagingKeyName } from '@shared/messaging'
 import type { FeatureRouteProps } from '@/app/features'
 import { PageHead } from '@/components/PageHead'
 import { ApiError, BACKEND } from '@/core/api/client'
 import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, cls, DataTable, Field, Pill, Segmented, Stat, useToast } from '@/ui'
-import { messagingOf, templateOf, useMessaging, vars } from './useMessaging'
+import { Button, Card, cls, DataTable, Field, Pill, Segmented, useToast } from '@/ui'
+import { SendOne } from './SendOne'
+import { messagingOf, templateOf } from './useMessaging'
 
-type Tab = 'send' | 'reminders' | 'log' | 'settings'
-const TABS: Tab[] = ['send', 'reminders', 'log', 'settings']
+type Tab = 'send' | 'log' | 'settings'
+const TABS: Tab[] = ['send', 'log', 'settings']
 const CH: Record<MessageChannel, string> = { whatsapp: 'WhatsApp', sms: 'SMS' }
 const KIND = Object.fromEntries(MESSAGE_KINDS.map((k) => [k.kind, k.label])) as Record<MessageKind, string>
 
-/** #/messages: send to dealers by WhatsApp or SMS, chase dues, and see everything that went out. */
+/** #/messages: one message to one person, on WhatsApp or as an SMS. */
 export default function MessagesPage({ params: [tabParam] }: FeatureRouteProps) {
   const { db } = useBooks()
   const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'send'
   const s = messagingOf(db)
   const log = db.messages || []
-  const month = todayISO().slice(0, 7)
-  const thisMonth = log.filter((m) => m.date.startsWith(month))
   return (
     <>
-      <PageHead title="Messages" sub="Estimates, bills, payment receipts, due reminders and greetings to dealers on WhatsApp or SMS, by themselves or when you choose." />
+      <PageHead title="Messages" sub="Send one message to one person, on WhatsApp or as a mobile SMS." />
       {s.testMode && (
         <div className="alert-strip info" role="status">
-          <div><b>Test mode is on</b><span>Messages are logged here but nothing is sent. Turn it off under Settings when WhatsApp or SMS is set up.</span></div>
+          <div><b>Test mode is on</b><span>Messages are saved in the log but nothing is really sent. Turn it off under Settings when WhatsApp or SMS is ready.</span></div>
           <button type="button" className="link" onClick={() => go('messages/settings')}>Settings</button>
         </div>
       )}
-      <div className="stats">
-        <Stat icon="send" label="Sent this month" value={String(thisMonth.filter((m) => m.status !== 'failed').length)} sub={`${thisMonth.filter((m) => m.channel === 'whatsapp').length} WhatsApp · ${thisMonth.filter((m) => m.channel === 'sms').length} SMS`} />
-        <Stat icon="alert" label="Failed" value={String(thisMonth.filter((m) => m.status === 'failed').length)} tone={thisMonth.some((m) => m.status === 'failed') ? 'warn' : undefined} sub="This month" />
-        <Stat icon="clock" label="Dealers to remind" value={String(receivables(db).rows.filter((r) => r.overdue).length)} sub={`Overdue ${s.reminderDays}+ days`} />
-        <Stat icon="settings" label="Channels" value={[s.whatsapp !== 'off' && 'WhatsApp', s.sms !== 'off' && 'SMS'].filter(Boolean).join(' + ') || 'None'} sub={s.whatsapp === 'cloud' ? 'WhatsApp sends by itself' : s.whatsapp === 'link' ? 'WhatsApp opens for you to send' : 'WhatsApp off'} />
-      </div>
       <Segmented<Tab> label="Messages section" value={tab} onChange={(t) => go(t === 'send' ? 'messages' : 'messages/' + t)} options={[
-        { value: 'send', label: 'Send' }, { value: 'reminders', label: 'Due reminders' }, { value: 'log', label: `Log (${log.length})` }, { value: 'settings', label: 'Settings' },
+        { value: 'send', label: 'Send' }, { value: 'log', label: `Sent messages (${log.length})` }, { value: 'settings', label: 'Settings' },
       ]} />
-      {tab === 'send' && <SendTab />}
-      {tab === 'reminders' && <RemindersTab />}
+      {tab === 'send' && (
+        <Card icon="send" title="Send a message">
+          <div className="card-body pt0"><SendOne /></div>
+        </Card>
+      )}
       {tab === 'log' && <LogTab />}
       {tab === 'settings' && <SettingsTab />}
     </>
-  )
-}
-
-/** Run a list of sends one after another and say how it went. */
-function useBatch() {
-  const toast = useToast()
-  const [busy, setBusy] = useState(false)
-  const run = async (jobs: (() => Promise<{ ok: boolean }>)[]) => {
-    setBusy(true)
-    let ok = 0
-    for (const j of jobs) if ((await j()).ok) ok++
-    setBusy(false)
-    toast(`${ok} of ${jobs.length} sent${ok < jobs.length ? '; see the log for the rest' : ''}`)
-  }
-  return { busy, run }
-}
-
-function SendTab() {
-  const { db } = useBooks()
-  const msg = useMessaging()
-  const { busy, run } = useBatch()
-  const areas = [...new Set(db.dealers.map((d) => d.area).filter(Boolean))]
-  const [who, setWho] = useState<'all' | 'area' | 'pick'>('all')
-  const [area, setArea] = useState(areas[0] || '')
-  const [picked, setPicked] = useState<string[]>([])
-  const [text, setText] = useState(() => templateOf(db, 'occasional'))
-  const [chans, setChans] = useState<MessageChannel[]>(msg.channels.slice(0, 1))
-  const to = db.dealers.filter((d) => (who === 'all' ? true : who === 'area' ? d.area === area : picked.includes(d.id)))
-  const preview = to[0] ? renderTemplate(text, vars.occasional(db, to[0].id)) : renderTemplate(text, { company: db.company.name, dealer: 'Dealer' })
-  const link = msg.settings.whatsapp === 'link' && !msg.settings.testMode && chans.includes('whatsapp')
-  const IDEAS = [
-    ['Eid greeting', DEFAULT_TEMPLATES.occasional],
-    ['New product', 'Dear {dealer}, {company} has a new product in stock. Ask your sales officer for the price list. Thank you.'],
-    ['Price change', 'Dear {dealer}, from next month our prices change. Please call {company} for the new list. Orders placed this month keep the old price.'],
-    ['Holiday closing', 'Dear {dealer}, {company} will be closed for the holidays. Please place your orders before then. Thank you.'],
-  ]
-  return (
-    <Card icon="send" title="Send a message" sub="Greetings, new products, price changes: to every dealer, an area, or the ones you pick. {dealer} and other words in braces fill in for each one.">
-      <div className="card-body pt0 form-grid">
-        <div className="field">
-          <span className="field-label">To</span>
-          <Segmented<'all' | 'area' | 'pick'> label="Recipients" value={who} onChange={setWho} options={[{ value: 'all', label: `All dealers (${db.dealers.length})` }, { value: 'area', label: 'One area' }, { value: 'pick', label: 'Pick dealers' }]} />
-        </div>
-        {who === 'area' && <Field label="Area"><select className="in" value={area} onChange={(e) => setArea(e.target.value)}>{areas.map((a) => <option key={a}>{a}</option>)}</select></Field>}
-        {who === 'pick' && (
-          <div className="field wide chips">
-            {db.dealers.map((d) => <button key={d.id} type="button" className={cls('chip', picked.includes(d.id) && 'on')} aria-pressed={picked.includes(d.id)} onClick={() => setPicked(picked.includes(d.id) ? picked.filter((x) => x !== d.id) : [...picked, d.id])}>{d.name}</button>)}
-          </div>
-        )}
-        <div className="field wide">
-          <span className="field-label">Start from</span>
-          <div className="chips">{IDEAS.map(([l, t]) => <button key={l} type="button" className="chip" onClick={() => setText(t)}>{l}</button>)}</div>
-        </div>
-        <Field label="Message" wide hint={`${text.length} characters${text.length > 160 ? ' · more than one SMS' : ''}. Fill-ins: ${PLACEHOLDERS.join(' ')}`}>
-          <textarea className="in" rows={4} value={text} onChange={(e) => setText(e.target.value)} />
-        </Field>
-        <div className="field wide"><span className="field-label">Preview{to[0] ? ` for ${to[0].name}` : ''}</span><p className="msg-preview">{preview}</p></div>
-        <div className="field">
-          <span className="field-label">Send by</span>
-          {msg.channels.length ? (
-            <div className="chips">{msg.channels.map((c) => <button key={c} type="button" className={cls('chip', chans.includes(c) && 'on')} aria-pressed={chans.includes(c)} onClick={() => setChans(chans.includes(c) ? chans.filter((x) => x !== c) : [...chans, c])}>{CH[c]}</button>)}</div>
-          ) : <small>No channel is on. Switch on WhatsApp or SMS under Settings.</small>}
-        </div>
-        <div className="field btn-row tight-row">
-          {link ? (
-            <small>WhatsApp is in link mode: open each chat below and press send.</small>
-          ) : (
-            <Button icon="send" disabled={busy || !to.length || !chans.length || !text.trim()} onClick={() => void run(to.flatMap((d) => chans.map((c) => () => msg.send('occasional', c, d.id, renderTemplate(text, vars.occasional(db, d.id)))))) }>
-              {busy ? 'Sending…' : `Send to ${to.length} dealer${to.length === 1 ? '' : 's'}`}
-            </Button>
-          )}
-        </div>
-      </div>
-      {link && (
-        <div className="rows">
-          {to.map((d) => (
-            <div key={d.id} className="row-wrap">
-              <div className="row"><span className="name">{d.name}</span><span className="meta">{d.phone || 'No phone'}</span><span className="amt" /></div>
-              <Button size="sm" variant="secondary" icon="send" disabled={!d.phone} onClick={() => void msg.send('occasional', 'whatsapp', d.id, renderTemplate(text, vars.occasional(db, d.id)))}>Open WhatsApp</Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  )
-}
-
-function RemindersTab() {
-  const { db } = useBooks()
-  const msg = useMessaging()
-  const toast = useToast()
-  const { busy, run } = useBatch()
-  const [chan, setChan] = useState<MessageChannel>(msg.channels[0] || 'whatsapp')
-  const rows = receivables(db).rows.filter((r) => r.due > 0)
-  const lastSent = (dealerId: string) => (db.messages || []).find((m) => m.dealerId === dealerId && m.kind === 'reminder' && m.status !== 'failed')?.date
-  const overdue = rows.filter((r) => r.overdue)
-  return (
-    <Card icon="clock" title="Due reminders" sub={`Dealers who owe money. Automatic reminders go ${msg.settings.reminderDays} days after a bill falls due, then every ${msg.settings.reminderDays} days, when switched on under Settings.`}
-      action={<div className="btn-row tight-row">
-        {msg.channels.length > 1 && <Segmented<MessageChannel> label="Channel" value={chan} onChange={setChan} options={msg.channels.map((c) => ({ value: c, label: CH[c] }))} />}
-        {!(msg.settings.whatsapp === 'link' && chan === 'whatsapp' && !msg.settings.testMode) && (
-          <Button size="sm" icon="send" disabled={busy || !overdue.length || !msg.channels.length} onClick={() => void run(overdue.map((r) => () => msg.send('reminder', chan, r.dealer.id, msg.render('reminder', vars.reminder(db, r.dealer.id)), dealerLedger(db, r.dealer.id).open[0]?.id)))}>
-            {busy ? 'Sending…' : `Remind all ${overdue.length} overdue`}
-          </Button>
-        )}
-      </div>}>
-      <DataTable rows={rows} rowKey={(r) => r.dealer.id} empty="No dealer owes anything."
-        columns={[
-          { label: 'Dealer', primary: true, render: (r) => <span className="two-line"><b>{r.dealer.name}</b><small>{r.dealer.phone || 'No phone'}</small></span> },
-          { label: 'Due', align: 'right', render: (r) => <b>{tk(r.due)}</b> },
-          { label: 'Status', render: (r) => <Pill tone={r.overdue ? 'warn' : 'neutral'}>{r.statusText}</Pill> },
-          { label: 'Last reminder', render: (r) => <span className="t-muted">{lastSent(r.dealer.id) ? fshort(lastSent(r.dealer.id)) : 'Never'}</span> },
-          { label: '', align: 'right', render: (r) => (
-            <Button size="sm" variant="secondary" icon="send" className="edit-only" disabled={!msg.channels.length}
-              onClick={async (e) => { e.stopPropagation(); const res = await msg.send('reminder', chan, r.dealer.id, msg.render('reminder', vars.reminder(db, r.dealer.id)), dealerLedger(db, r.dealer.id).open[0]?.id); toast(res.text) }}>Remind</Button>
-          ) },
-        ]} />
-    </Card>
   )
 }
 
@@ -171,13 +49,13 @@ function LogTab() {
   const [kind, setKind] = useState<MessageKind | ''>('')
   const rows = (db.messages || []).filter((m) => !kind || m.kind === kind)
   return (
-    <Card icon="receipt" title="Message log" sub="Everything sent, opened in WhatsApp, or failed, newest first."
+    <Card icon="receipt" title="Sent messages" sub="Every message, newest first: sent, opened in WhatsApp, or failed with the reason."
       action={<select className="in narrow-select" value={kind} onChange={(e) => setKind(e.target.value as MessageKind | '')} aria-label="Kind">
         <option value="">All kinds</option>{MESSAGE_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}
       </select>}>
       <DataTable pageSize={25} rows={rows} rowKey={(m) => m.id} empty="Nothing sent yet."
         columns={[
-          { label: 'To', primary: true, render: (m) => <span className="two-line"><b>{byId(db.dealers, m.dealerId)?.name || m.to}</b><small>{fshort(m.date)} · {CH[m.channel]} · {m.to}</small></span> },
+          { label: 'To', primary: true, render: (m) => <span className="two-line"><b>{byId(db.dealers, m.dealerId)?.name || m.name || m.to}</b><small>{fshort(m.date)} · {CH[m.channel]} · {m.to}</small></span> },
           { label: 'Kind', render: (m) => <span className="two-line"><span>{KIND[m.kind]}</span>{m.ref && <small className="t-muted">{m.ref}</small>}</span> },
           { label: 'Message', render: (m) => <span className="t-muted msg-cell">{m.text}</span> },
           { label: 'Status', align: 'right', render: (m) => <span className="two-line right"><Pill tone={m.status === 'failed' ? 'warn' : m.status === 'opened' ? 'info' : 'good'}>{m.status === 'failed' ? 'Failed' : m.status === 'opened' ? 'Opened in WhatsApp' : m.test ? 'Sent (test)' : 'Sent'}</Pill>{m.error && <small className="t-warn">{m.error}</small>}</span> },

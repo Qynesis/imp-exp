@@ -15,6 +15,8 @@ export interface DeliveryLine {
   price: number
   ordered: number
   delivered: number
+  /** Closed without delivering. */
+  cancelled: number
   returned: number
   /** Still to hand over. */
   remaining: number
@@ -39,16 +41,18 @@ export const invoiceDelivery = (db: Db, inv: Invoice): InvoiceDelivery =>
     const tracked = tracksDelivery(inv)
     const lines = inv.lines.map((l): DeliveryLine => {
       const p = byId(db.products, l.productId)
-      const delivered = tracked ? sum(dels, (d) => sum(d.lines.filter((x) => x.productId === l.productId), (x) => x.qty)) : l.qty
+      const qtyOf = (list: typeof dels) => sum(list, (d) => sum(d.lines.filter((x) => x.productId === l.productId), (x) => x.qty))
+      const delivered = tracked ? qtyOf(dels.filter((d) => !d.cancelled)) : l.qty
+      const cancelled = tracked ? qtyOf(dels.filter((d) => d.cancelled)) : 0
       const returned = sum(rets, (r) => sum(r.lines.filter((x) => x.productId === l.productId), (x) => x.qty))
       return {
         productId: l.productId, name: l.name || p?.name || 'Product', unit: l.unit || p?.unit || '', price: l.price,
-        ordered: l.qty, delivered, returned, remaining: Math.max(l.qty - delivered, 0), returnable: Math.max(delivered - returned, 0),
+        ordered: l.qty, delivered, cancelled, returned, remaining: Math.max(l.qty - delivered - cancelled, 0), returnable: Math.max(delivered - returned, 0),
       }
     })
     const remainingUnits = sum(lines, (l) => l.remaining)
     const deliveredUnits = sum(lines, (l) => l.delivered)
-    const last = dels.map((d) => d.date).sort().at(-1) || ''
+    const last = dels.filter((d) => !d.cancelled).map((d) => d.date).sort().at(-1) || ''
     return {
       lines, remainingUnits, lastDelivery: last,
       status: remainingUnits <= 0 ? 'delivered' : deliveredUnits > 0 ? 'partial' : 'pending',
@@ -68,7 +72,8 @@ export const pendingDeliveries = (db: Db): { inv: Invoice; d: InvoiceDelivery }[
 
 /** Billed but not yet handed over: in the warehouse, but already promised. */
 export const reservedQty = (db: Db, productId: string): number =>
-  memo(db, 'reserved:' + productId, () => sum(pendingDeliveries(db), (x) => sum(x.d.lines.filter((l) => l.productId === productId), (l) => l.remaining)))
+  // sample bills hold nothing: the stock is real, they are not
+  memo(db, 'reserved:' + productId, () => sum(pendingDeliveries(db).filter((x) => !x.inv.sample), (x) => sum(x.d.lines.filter((l) => l.productId === productId), (l) => l.remaining)))
 
 /** What can still be sold: stock less what invoices are waiting for. */
 export const availableQty = (db: Db, p: Product): number => p.stock - reservedQty(db, p.id)
@@ -109,6 +114,20 @@ export const returnsBetween = (db: Db, from: ISODate, to: ISODate): ReturnsSumma
       byProduct: [...products.values()].sort((a, b) => b.units - a.units),
       byReason: [...reasons.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count),
     }
+  })
+
+/** Everything still to load across waiting bills, product by product: the warehouse's loading list. */
+export const loadingList = (db: Db): { productId: string; name: string; unit: string; qty: number; stock: number; bills: number }[] =>
+  memo(db, 'loadingList', () => {
+    const m = new Map<string, { productId: string; name: string; unit: string; qty: number; stock: number; bills: number }>()
+    for (const x of pendingDeliveries(db).filter((y) => !y.inv.sample))
+      for (const l of x.d.lines.filter((y) => y.remaining > 0)) {
+        const r = m.get(l.productId) || { productId: l.productId, name: l.name, unit: l.unit, qty: 0, stock: byId(db.products, l.productId)?.stock || 0, bills: 0 }
+        r.qty += l.remaining
+        r.bills++
+        m.set(l.productId, r)
+      }
+    return [...m.values()].sort((a, b) => b.qty - a.qty)
   })
 
 export const lastNDays = (n: number): [ISODate, ISODate] => [addDays(todayISO(), -n), todayISO()]

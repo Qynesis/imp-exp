@@ -101,7 +101,7 @@ export default function TransportPage({ params: [tabParam] }: FeatureRouteProps)
           />
         </Card>
         <Card icon="wallet" title={`Where the money went · ${fmonth(month)}`}>
-          <BarList format={tk} empty="No transport costs this month." rows={now.byKind.map((k) => ({ id: k.kind, name: k.kind, value: k.amount }))} />
+          <BarList share="of the total" format={tk} empty="No transport costs this month." rows={now.byKind.map((k) => ({ id: k.kind, name: k.kind, value: k.amount }))} />
         </Card>
       </div>
 

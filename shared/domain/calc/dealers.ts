@@ -51,7 +51,11 @@ export const dealerLedger = (db: Db, dealerId: string): DealerLedger =>
       })
     }
     // returned goods credited to the dealer pay off debts like a collection, without cash changing hands
-    const credits = (db.returns || []).filter((r) => r.dealerId === dealerId && r.credit > 0).map((r) => ({ ...r, amount: r.credit, method: 'Return credit', collectedBy: '' }))
+    const credits = [
+      ...(db.returns || []).filter((r) => r.dealerId === dealerId && r.credit > 0).map((r) => ({ ...r, amount: r.credit, method: 'Return credit', collectedBy: '' })),
+      // the undelivered rest of a bill, closed with a credit
+      ...(db.deliveries || []).filter((x) => x.dealerId === dealerId && x.cancelled && (x.credit || 0) > 0).map((x) => ({ ...x, amount: x.credit || 0, method: 'Return credit', collectedBy: '' })),
+    ]
     const cols = [...db.collections.filter((c) => c.dealerId === dealerId), ...credits].sort(byDateTs)
     for (const c of cols) {
       let amt = c.amount
@@ -90,7 +94,8 @@ export const dealerLedger = (db: Db, dealerId: string): DealerLedger =>
 /** Dealers who owe money, biggest first. */
 export const receivables = (db: Db) =>
   memo(db, 'receivables', () => {
-    const rows = db.dealers.map((d) => dealerLedger(db, d.id)).filter((l) => l.due > 0).sort((a, b) => b.due - a.due)
+    // the sample dealer's bills are made up, so they are never owed to us
+    const rows = db.dealers.filter((d) => !d.sample).map((d) => dealerLedger(db, d.id)).filter((l) => l.due > 0).sort((a, b) => b.due - a.due)
     return { rows, total: sum(rows, (r) => r.due) }
   })
 
