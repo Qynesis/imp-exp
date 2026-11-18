@@ -21,15 +21,18 @@ export function Card({ title, sub, action, children, className, icon }: { title?
   )
 }
 
-export function Stat({ label, value, sub, tone, icon }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: Tone; icon?: IconName }) {
-  return (
-    <div className={cls('card stat', icon && 'has-icon')}>
+/** A figure with its label. With `href` the whole card is a link to the screen behind the number. */
+export function Stat({ label, value, sub, tone, icon, href }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: Tone; icon?: IconName; href?: string }) {
+  const body = (
+    <>
       {icon && <IconBadge name={icon} tone={tone === 'warn' ? 'warn' : tone === 'info' ? 'info' : 'brand'} />}
       <div className="stat-label">{label}</div>
       <div className={cls('stat-value', tone && `t-${tone}`)}>{value}</div>
       {sub && <div className="stat-sub">{sub}</div>}
-    </div>
+    </>
   )
+  if (href) return <a className={cls('card stat stat-link', icon && 'has-icon')} href={href}>{body}<span className="stat-go" aria-hidden="true">→</span></a>
+  return <div className={cls('card stat', icon && 'has-icon')}>{body}</div>
 }
 
 export const Pill = ({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) => <span className={cls('pill', tone)}>{children}</span>

@@ -64,3 +64,4 @@
 
 .lang-row { padding: 10px 10px 0; }
 .sheet .lang-row { padding: 14px 0 4px; }
+.grid2 > .span-all { grid-column: 1 / -1; }

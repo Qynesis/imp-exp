@@ -12,6 +12,8 @@ export function usePaged<R>(rows: readonly R[], size: number) {
     setSeen(rows.length)
     setPage(0)
   }
+  // no page size (or Infinity) means one page with everything; 0 × Infinity would be NaN
+  if (!Number.isFinite(size) || size <= 0) return { rows, pager: null }
   const pages = Math.max(Math.ceil(rows.length / size), 1)
   const current = Math.min(page, pages - 1)
   return {

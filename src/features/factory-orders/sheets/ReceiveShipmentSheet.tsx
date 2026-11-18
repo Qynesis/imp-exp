@@ -1,28 +1,64 @@
-import { byId, fmt, foCalc, num, todayISO } from '@shared/domain'
+import { byId, fmt, foCalc, num, todayISO, tk, tripCalc, trips } from '@shared/domain'
+import { MethodSelect } from '@/components/MethodSelect'
 import { useBooks } from '@/core/store/context'
-import { Field, FormSheet, useForm, useToast } from '@/ui'
+import { Field, FormSheet, Segmented, useForm, useToast } from '@/ui'
 
+type FreightMode = 'none' | 'in' | 'out'
+
+/**
+ * One shipment from the factory into our warehouse. Several shipments can arrive against the same
+ * order; payment is separate and never required here. Freight from factory to warehouse can be
+ * added to the product cost (included) or kept as a transport expense only (excluded).
+ */
 export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
   const { db, act } = useBooks()
   const toast = useToast()
-  const [v, , bind, nbind] = useForm({ date: todayISO(), challan: '', qty: '', damaged: '', note: '' })
+  const [v, set, bind, nbind] = useForm({ date: todayISO(), challan: '', qty: '', damaged: '', note: '', freightMode: 'none' as FreightMode, freight: '', method: 'Cash' })
   const o = byId(db.factoryOrders, orderId)
   if (!o) return null
   const c = foCalc(db, o)
+  const qty = num(v.qty)
+  const freight = v.freightMode === 'none' ? 0 : num(v.freight)
+  // a pickup trip already booked for this order carries its own costs
+  const booked = trips(db).filter((t) => t.orderId === o.id && t.status !== 'cancelled')
+  const bookedCost = booked.reduce((s, t) => s + tripCalc(db, t).cost, 0)
+  const prod = c.product
+  const unitIn = qty > 0 && v.freightMode === 'in' ? o.rate + freight / qty : 0
+  const newCost = prod && unitIn ? (Math.max(prod.stock, 0) * prod.cost + qty * unitIn) / (Math.max(prod.stock, 0) + qty) : 0
   return (
-    <FormSheet title={`Receive shipment · ${o.id}`} crumb="Factory order" submit="Receive goods"
-      note={`Still due from ${c.factory?.name}: ${fmt(c.pending)} of ${fmt(o.qty)} ${c.unit}. Whatever is not received now stays pending on this order.`}
+    <FormSheet title={`Receive shipment · ${o.id}`} crumb="Factory order" submit="Receive goods" wide
+      note={`Still due from ${c.factory?.name}: ${fmt(c.pending)} of ${fmt(o.qty)} ${c.unit}. Whatever is not received now stays pending on this order. Payment is recorded separately, whenever you pay.`}
       onSubmit={() => {
-        const qty = num(v.qty)
         if (qty <= 0) return 'Enter the quantity received.'
-        if (qty > c.pending) return `Only ${fmt(c.pending)} ${c.unit} are still pending on this order.`
-        act('receiveShipment', { orderId, date: v.date, challan: v.challan.trim(), qty, damaged: num(v.damaged), note: v.note.trim() })
-        toast(`${fmt(qty)} ${c.unit} added to stock`)
+        if (qty > c.pending) return `Only ${fmt(c.pending)} ${c.unit} are still pending on this order. Change the order first if the factory sent more.`
+        if (v.freightMode !== 'none' && freight <= 0) return 'Enter the freight paid, or choose No freight.'
+        act('receiveShipment', { orderId, date: v.date, challan: v.challan.trim(), qty, damaged: num(v.damaged), note: v.note.trim(), freight, freightInCost: v.freightMode === 'in', method: v.method })
+        toast(`${fmt(qty)} ${c.unit} added to stock${freight ? ` · freight ${tk(freight)} saved` : ''}`)
       }}>
       <Field label="Date received"><input type="date" {...bind('date')} /></Field>
       <Field label="Challan number"><input {...bind('challan')} placeholder="e.g. CH-320" /></Field>
       <Field label={`Good quantity received (${c.unit})`}><input {...nbind('qty')} placeholder={`Up to ${fmt(c.pending)}`} /></Field>
       <Field label="Damaged or rejected" hint="Recorded on the challan, not added to stock."><input {...nbind('damaged')} placeholder="0" /></Field>
+
+      <div className="field wide">
+        <span className="field-label">Freight from factory to warehouse</span>
+        <Segmented<FreightMode> label="Freight" value={v.freightMode} onChange={(m) => set('freightMode', m)} options={[
+          { value: 'none', label: 'No freight' },
+          { value: 'in', label: 'Include in product cost' },
+          { value: 'out', label: 'Exclude (expense only)' },
+        ]} />
+        <small>
+          {v.freightMode === 'in' ? 'The freight is spread over this shipment and goes into the cost per unit, so profit on sales reflects it.'
+            : v.freightMode === 'out' ? 'The freight goes into the cashbook as a transport expense; the product cost stays as it is.'
+            : booked.length ? `Pickup ${booked.map((t) => t.id).join(', ')} is booked for this order (${tk(bookedCost)} so far). Its costs are already recorded.` : 'Choose No freight when the factory delivers free or the trip is booked under Transport.'}
+        </small>
+      </div>
+      {v.freightMode !== 'none' && (
+        <>
+          <Field label="Freight paid (Tk)" hint={unitIn ? `Cost per ${c.unit.replace(/s$/, '')} on this shipment ${tk(unitIn)}; product cost becomes about ${tk(newCost)}` : undefined}><input {...nbind('freight')} placeholder="0" /></Field>
+          <Field label="Freight paid by"><MethodSelect {...bind('method')} /></Field>
+        </>
+      )}
       <Field label="Note" wide><input {...bind('note')} placeholder="Optional" /></Field>
     </FormSheet>
   )

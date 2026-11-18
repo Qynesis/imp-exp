@@ -38,6 +38,7 @@ export function DealerFields({ db, v, set, bind, nbind, idPrefix }: {
           {db.employees.filter((e) => e.payType === 'sales').map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
       </Field>
+      <label className="check field wide"><input type="checkbox" checked={v.courier} onChange={(e) => set('courier', e.target.checked)} /> Deliver by courier (parcels can be booked for this dealer by themselves)</label>
       <CustomFields entity="dealer" value={v.custom} onChange={(c) => set('custom', c)} />
     </>
   )

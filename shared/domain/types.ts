@@ -17,6 +17,7 @@ export type PageId =
   | 'raw-materials'
   | 'sales-analytics'
   | 'transport'
+  | 'courier'
   | 'suppliers'
   | 'imports'
   | 'customs'
@@ -57,6 +58,8 @@ export interface Company {
   logo: string
   /** Monthly sales target in Taka; missing or 0 means none set. */
   salesTarget?: number
+  /** Courier service for delivering to customers; missing until set up. */
+  courier?: CourierSettings
 }
 
 /* ---------- custom fields ---------- */
@@ -153,6 +156,41 @@ export interface FactoryReceipt extends Dated {
   qty: number
   damaged: number
   note: string
+  /** What we paid to bring this shipment from the factory to the warehouse. */
+  freight?: number
+  /** True when the freight is added into the product's cost per unit; false keeps it as a plain expense. */
+  freightInCost?: boolean
+}
+/** A change to an order while the factory is still working on it. */
+export interface OrderAmendment extends Dated {
+  id: string
+  fromQty: number
+  toQty: number
+  fromRate: number
+  toRate: number
+  reason: string
+}
+export type EstimateStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'ordered'
+/** A price and quantity proposal sent to a factory before the order is confirmed. */
+export interface FactoryEstimate extends Dated {
+  id: string
+  factoryId: string
+  type: FactoryOrderType
+  productId: string
+  qty: number
+  rate: number
+  /** When we would like the goods. */
+  wanted: ISODate | ''
+  /** How long the factory's price holds. */
+  validUntil: ISODate | ''
+  materials: MaterialGiven[]
+  note: string
+  status: EstimateStatus
+  sentOn?: ISODate
+  /** Approval or rejection date, with what the factory said. */
+  answeredOn?: ISODate
+  answer?: string
+  orderId?: string
 }
 export interface FactoryBill extends Dated {
   id: string
@@ -193,6 +231,10 @@ export interface FactoryOrder {
   placed: ISODate
   expected: ISODate
   materials: MaterialGiven[]
+  /** The estimate this order was confirmed from, if any. */
+  estimateId?: string
+  /** Quantity or rate changes made after the order was placed. */
+  amendments?: OrderAmendment[]
   /** Missing in books saved before material returns were added. */
   settlements?: MaterialSettlement[]
   custom?: CustomValues
@@ -305,6 +347,8 @@ export interface Dealer {
   limit: number
   days: number
   salesId: string
+  /** Goods go to this dealer by courier; with auto-booking on, a parcel is booked when a sale is saved. */
+  courier?: boolean
   custom?: CustomValues
 }
 
@@ -412,7 +456,7 @@ export interface Trip extends Dated {
   note: string
 }
 export type TransportCostKind =
-  | 'Fuel' | 'Hire charge' | 'Vehicle rent' | 'Driver allowance' | 'Loading and unloading' | 'Toll and parking'
+  | 'Fuel' | 'Hire charge' | 'Freight to warehouse' | 'Vehicle rent' | 'Driver allowance' | 'Loading and unloading' | 'Toll and parking'
   | 'Repair' | 'Servicing' | 'Tyres and parts' | 'Papers and tax' | 'Insurance' | 'Other'
 export interface TransportLink {
   kind: TransportCostKind
@@ -420,6 +464,8 @@ export interface TransportLink {
   tripId?: string
   /** For hire charges: the agency or truck owner paid. */
   transporter?: string
+  /** Freight for goods from a factory order. */
+  orderId?: string
   odometer?: number
 }
 export interface Advance extends Dated {
@@ -466,6 +512,8 @@ export interface Sequences {
   pb: number
   /** Next trip number; missing in older books. */
   trip?: number
+  /** Next estimate number; missing in older books. */
+  est?: number
 }
 
 export interface Db {
@@ -500,6 +548,51 @@ export interface Db {
   /** Missing in books saved before transport was added. */
   vehicles?: Vehicle[]
   trips?: Trip[]
+  /** Missing in books saved before factory estimates were added. */
+  estimates?: FactoryEstimate[]
+  /** Missing in books saved before courier booking was added. */
+  parcels?: Parcel[]
+}
+
+/* ---------- courier ---------- */
+export type CourierProvider = 'steadfast' | 'pathao' | 'redx' | 'manual' | 'demo'
+/** Courier choices kept with the books. The API keys are not here: they stay on the server (or in this browser). */
+export interface CourierSettings {
+  /** The courier used unless another is picked when booking. */
+  provider: CourierProvider
+  /** Book a parcel by itself when a credit or cash sale is saved for a dealer who takes courier delivery. */
+  autoBook: boolean
+  /** Couriers offered when booking; missing means just the default one. */
+  enabled?: CourierProvider[]
+}
+export interface ParcelEvent {
+  date: ISODate
+  status: string
+}
+export interface Parcel extends Dated {
+  id: string
+  invoiceId: string
+  dealerId: string
+  provider: CourierProvider
+  consignmentId: string
+  trackingCode: string
+  trackingUrl: string
+  status: string
+  /** Cash the courier collects from the customer. */
+  cod: number
+  recipientName: string
+  phone: string
+  address: string
+  note: string
+  history: ParcelEvent[]
+  /** Weight in kg, as told to the courier. */
+  weight?: number
+  /** The courier's own delivery area, for couriers that need one (Pathao city and zone, RedX area). */
+  areaName?: string
+  /** What the courier charged for delivery, when it says. */
+  charge?: number
+  /** Our reference sent to the courier: the invoice number, or an order number for other customers. */
+  reference?: string
 }
 
 /** Cheap structural check before trusting a parsed backup or API payload. */

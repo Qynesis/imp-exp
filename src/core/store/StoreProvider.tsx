@@ -136,6 +136,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setToken('', 'platform')
         setSt({ phase: 'signedOut', db: null, session: null })
       },
+      call: <T,>(method: HttpMethod, path: string, body?: unknown) => request<T>(method, path, body, ref.current.token),
       users: async (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => enter(await request<BooksResponse>(method, 'users' + query, body, ref.current.token)),
     }
   }, [enter, leave])

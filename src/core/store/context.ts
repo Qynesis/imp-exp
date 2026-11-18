@@ -25,6 +25,8 @@ export interface StoreValue {
   platformSignOut(): void
   /** User management goes through the API because it owns the passwords. */
   users(method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query?: string): Promise<void>
+  /** Any other API call made as the signed-in user, e.g. courier booking. */
+  call<T>(method: HttpMethod, path: string, body?: unknown): Promise<T>
 }
 
 export const StoreContext = createContext<StoreValue | null>(null)

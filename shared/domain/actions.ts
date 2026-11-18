@@ -9,7 +9,7 @@ import { productInUse } from './calc/products'
 import { computeShipment } from './calc/shipments'
 import type {
   Advance, BusinessTypeId, Category, Collection, Company, CustomsInfo, CustomsStage, Dealer, Db, Direction, Employee, Expense, Factory,
-  FactoryOrderType, FieldDef, ISODate, Invoice, MaterialGiven, MaterialSettlement, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
+  FactoryOrderType, FieldDef, ISODate, Invoice, FactoryEstimate, MaterialGiven, MaterialSettlement, Parcel, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
   CustomValues,
 } from './types'
 
@@ -29,6 +29,8 @@ export interface NewFactoryOrderInput {
   method: string
   materials: MaterialGiven[]
   custom: CustomValues
+  /** Set when the order comes from an approved estimate. */
+  estimateId?: string
 }
 export interface NewShipmentInput extends Omit<Shipment, 'id' | 'ts' | 'costs' | 'steps'> {
   direction: Direction
@@ -118,12 +120,55 @@ export const actions = {
     const id = 'FO-' + d.seq.fo++
     const order = {
       id, ts: tick(d), factoryId: p.factoryId, type: p.type, productId: p.productId, qty: p.qty, rate: p.rate,
-      placed: p.placed, expected: p.expected, materials: p.materials, custom: p.custom, receipts: [], bills: [],
+      placed: p.placed, expected: p.expected, materials: p.materials, custom: p.custom, receipts: [], bills: [], estimateId: p.estimateId,
       payments: p.advance > 0 ? [{ id: uid(d, 'fp'), ts: tick(d), date: p.placed, amount: p.advance, method: p.method, note: `Advance for ${id}` }] : [],
     }
     // materials handed to the factory leave our warehouse
     for (const m of p.materials) mustFind(d.products, m.productId, 'Product').stock -= m.given
     d.factoryOrders.unshift(order)
+    const est = byId(d.estimates || [], p.estimateId)
+    if (est) {
+      est.status = 'ordered'
+      est.orderId = id
+    }
+  },
+  /** A new estimate, or changes to one that has not become an order yet. */
+  saveEstimate(d: Db, p: Omit<FactoryEstimate, 'id' | 'ts' | 'status'> & { id?: string }) {
+    const list = (d.estimates ??= [])
+    const cur = byId(list, p.id)
+    if (cur) {
+      if (cur.status === 'ordered') throw new Error('Estimate already confirmed')
+      // a changed estimate has to be sent and approved again
+      Object.assign(cur, p, { status: 'draft', sentOn: undefined, answeredOn: undefined, answer: undefined })
+    } else {
+      list.unshift({ ...p, id: 'EST-' + (d.seq.est ??= 101), ts: tick(d), status: 'draft' })
+      d.seq.est++
+    }
+  },
+  setEstimateStatus(d: Db, p: { id: string; status: 'sent' | 'approved' | 'rejected' | 'draft'; date: ISODate; answer?: string; rate?: number; qty?: number }) {
+    const e = mustFind(d.estimates || [], p.id, 'Estimate')
+    if (e.status === 'ordered') throw new Error('Estimate already confirmed')
+    e.status = p.status
+    if (p.status === 'sent') e.sentOn = p.date
+    if (p.status === 'approved' || p.status === 'rejected') {
+      e.answeredOn = p.date
+      e.answer = p.answer || undefined
+      // the factory may come back with its own price or quantity
+      if (p.rate) e.rate = p.rate
+      if (p.qty) e.qty = p.qty
+    }
+  },
+  removeEstimate(d: Db, id: string) {
+    d.estimates = (d.estimates || []).filter((e) => e.id !== id || e.status === 'ordered')
+  },
+  /** Change the quantity or rate while the factory is working. Never below what has already arrived. */
+  amendOrder(d: Db, p: { orderId: string; qty: number; rate: number; date: ISODate; reason: string }) {
+    const o = mustFind(d.factoryOrders, p.orderId, 'Factory order')
+    const received = o.receipts.reduce((s, r) => s + r.qty, 0)
+    if (p.qty < received) throw new Error('Below what has arrived')
+    ;(o.amendments ??= []).push({ id: uid(d, 'am'), ts: tick(d), date: p.date, fromQty: o.qty, toQty: p.qty, fromRate: o.rate, toRate: p.rate, reason: p.reason })
+    o.qty = p.qty
+    o.rate = p.rate
   },
   /** Take leftover material back from a factory, or write it off as wastage there. */
   settleFactoryMaterial(d: Db, p: Omit<MaterialSettlement, 'id' | 'ts'> & { orderId: string }) {
@@ -132,11 +177,28 @@ export const actions = {
     ;(o.settlements ??= []).push({ id: uid(d, 'ms'), ts: tick(d), ...rest })
     if (p.kind === 'returned') mustFind(d.products, p.productId, 'Product').stock += p.qty
   },
-  receiveShipment(d: Db, p: { orderId: string; date: ISODate; challan: string; qty: number; damaged: number; note: string }) {
+  /**
+   * Goods arriving from a factory. Freight paid to bring them in is saved as a Transport expense; when
+   * it is part of the product's cost, the cost per unit becomes the average of what was in stock and
+   * this shipment at its order rate plus freight.
+   */
+  receiveShipment(d: Db, p: { orderId: string; date: ISODate; challan: string; qty: number; damaged: number; note: string; freight?: number; freightInCost?: boolean; method?: string }) {
     const o = mustFind(d.factoryOrders, p.orderId, 'Factory order')
-    o.receipts.push({ id: uid(d, 'fr'), ts: tick(d), date: p.date, challan: p.challan, qty: p.qty, damaged: p.damaged, note: p.note })
+    const id = uid(d, 'fr')
+    const freight = p.freight && p.freight > 0 ? p.freight : 0
+    o.receipts.push({ id, ts: tick(d), date: p.date, challan: p.challan, qty: p.qty, damaged: p.damaged, note: p.note, freight: freight || undefined, freightInCost: freight ? !!p.freightInCost : undefined })
+    if (freight) {
+      d.expenses.push({ id: uid(d, 'ex'), ts: tick(d), date: p.date, head: TRANSPORT_HEAD, amount: freight, method: p.method || 'Cash',
+        details: `Freight to warehouse · ${o.id}${p.challan ? ` · ${p.challan}` : ''}`, transport: { kind: 'Freight to warehouse', orderId: o.id } })
+    }
     const prod = byId(d.products, o.productId)
-    if (prod) prod.stock += p.qty
+    if (!prod) return
+    if (freight && p.freightInCost && p.qty > 0) {
+      const unit = o.rate + freight / p.qty
+      const before = Math.max(prod.stock, 0)
+      prod.cost = Math.round(((before * prod.cost + p.qty * unit) / (before + p.qty)) * 100) / 100
+    }
+    prod.stock += p.qty
   },
   factoryBill(d: Db, p: { orderId: string; date: ISODate; billNo: string; amount: number; receiptId: string }) {
     mustFind(d.factoryOrders, p.orderId, 'Factory order').bills.push({ id: uid(d, 'fb'), ts: tick(d), date: p.date, billNo: p.billNo, amount: p.amount, receiptId: p.receiptId })
@@ -267,6 +329,22 @@ export const actions = {
   /** Fuel, repairs, hire charges and every other transport cost. Goes into the cashbook as a Transport expense. */
   addTransportCost(d: Db, p: { date: ISODate; amount: number; method: string; details: string; link: TransportLink }) {
     addTransportExpense(d, p)
+  },
+
+  saveCourierSettings(d: Db, p: NonNullable<Company['courier']>) {
+    d.company.courier = p
+  },
+  saveParcel(d: Db, p: Omit<Parcel, 'id' | 'ts'> & { id?: string }) {
+    const list = (d.parcels ??= [])
+    const cur = byId(list, p.id)
+    if (cur) Object.assign(cur, p)
+    else list.unshift({ ...p, id: uid(d, 'pc'), ts: tick(d) })
+  },
+  setParcelStatus(d: Db, p: { id: string; status: string; date: ISODate }) {
+    const x = mustFind(d.parcels || [], p.id, 'Parcel')
+    if (x.status === p.status) return
+    x.status = p.status
+    x.history.push({ date: p.date, status: p.status })
   },
 
   addExpense(d: Db, p: Omit<Expense, 'id' | 'ts'>) {

@@ -29,6 +29,11 @@ export interface FactoryOrderCalc {
   unbilled: number
   pct: number
   typeLabel: string
+  /** Freight paid to bring the goods to the warehouse, and how much of it went into the product cost. */
+  freight: number
+  freightInCost: number
+  /** Quantity first ordered, before any amendment. */
+  firstQty: number
 }
 
 export const factoryOrderTypeLabel = (type: FactoryOrder['type']): string => (type === 1 ? 'Raw material supplied' : 'Direct order')
@@ -66,6 +71,9 @@ export const foCalc = (db: Db, o: FactoryOrder): FactoryOrderCalc =>
       balanceText, balanceTone, materials, unbilled: Math.max(o.qty * o.rate - billed, 0),
       pct: o.qty > 0 ? Math.min(100, Math.round((received / o.qty) * 100)) : 0,
       typeLabel: factoryOrderTypeLabel(o.type),
+      freight: sum(o.receipts, (r) => r.freight || 0),
+      freightInCost: sum(o.receipts.filter((r) => r.freightInCost), (r) => r.freight || 0),
+      firstQty: o.amendments?.[0]?.fromQty ?? o.qty,
     }
   })
 

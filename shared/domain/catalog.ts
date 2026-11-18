@@ -1,5 +1,5 @@
 /** Fixed lists the forms offer, and the trade presets that add extra fields and customs documents. */
-import type { BusinessTypeId, CustomEntity, Db, DutyKey, FieldDef, FieldType, PaperKey, ProductKind, ProductSource, Shipment, TransportCostKind, TripPurpose, TripStatus, VehicleType } from './types'
+import type { BusinessTypeId, CustomEntity, Db, DutyKey, FieldDef, FieldType, EstimateStatus, PaperKey, ProductKind, ProductSource, Shipment, TransportCostKind, TripPurpose, TripStatus, VehicleType } from './types'
 
 export const PAYMENT_METHODS = ['Cash', 'Bank transfer', 'bKash', 'Cheque'] as const
 export const UNITS = ['cartons', 'jars', 'pouches', 'pcs', 'units', 'sets', 'kg', 'litres', 'MT', 'boxes', 'bags', 'drums', 'rolls'] as const
@@ -25,8 +25,9 @@ export const TRIP_STATUS: Record<TripStatus, string> = { planned: 'Planned', 'on
 export const TRIP_COSTS: readonly TransportCostKind[] = ['Fuel', 'Driver allowance', 'Loading and unloading', 'Toll and parking', 'Hire charge']
 export const VEHICLE_COSTS: readonly TransportCostKind[] = ['Fuel', 'Repair', 'Servicing', 'Tyres and parts', 'Papers and tax', 'Insurance', 'Vehicle rent', 'Driver allowance', 'Toll and parking', 'Other']
 export const TRANSPORT_COSTS: readonly TransportCostKind[] = [
-  'Fuel', 'Hire charge', 'Vehicle rent', 'Driver allowance', 'Loading and unloading', 'Toll and parking', 'Repair', 'Servicing', 'Tyres and parts', 'Papers and tax', 'Insurance', 'Other',
+  'Fuel', 'Hire charge', 'Freight to warehouse', 'Vehicle rent', 'Driver allowance', 'Loading and unloading', 'Toll and parking', 'Repair', 'Servicing', 'Tyres and parts', 'Papers and tax', 'Insurance', 'Other',
 ]
+export const ESTIMATE_STATUS: Record<EstimateStatus, string> = { draft: 'Draft', sent: 'Sent to factory', approved: 'Approved', rejected: 'Rejected', ordered: 'Order confirmed' }
 export const TRANSPORT_HEAD = 'Transport'
 export const WAREHOUSE_PLACE = 'Our warehouse'
 export const EXPENSE_HEADS = ['Transport', 'Office', 'Employee', 'Other'] as const

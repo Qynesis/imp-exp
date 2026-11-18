@@ -4,6 +4,7 @@ import type { FeatureRouteProps } from '@/app/features'
 import { PageHead } from '@/components/PageHead'
 import { useBooks } from '@/core/store/context'
 import { Button, Card, DataTable, Icon, Segmented, useConfirm, usePrint, useSheets, useToast } from '@/ui'
+import { parcelDefaults, useCourier } from '@/features/courier/useCourier'
 import { InvoiceDoc } from './InvoiceDoc'
 import { InvoiceStatus } from './InvoiceStatus'
 import { InvoiceLineSheet } from './sheets/InvoiceLineSheet'
@@ -39,6 +40,7 @@ const fromInvoice = (inv: Invoice): Draft => ({
 /** #/sell, and #/sell/new/<dealer id> to start an invoice for one dealer. */
 export default function SellPage({ params }: FeatureRouteProps) {
   const { db, act } = useBooks()
+  const courier = useCourier()
   const sheets = useSheets()
   const toast = useToast()
   const confirm = useConfirm()
@@ -110,6 +112,16 @@ export default function SellPage({ params }: FeatureRouteProps) {
     toast(`Invoice ${nextId} saved`)
     print(<InvoiceDoc db={db} inv={preview} />)
     setF(blank(db, f.dealerId))
+    // dealers who take courier delivery get their parcel booked straight away
+    const saved = { ...preview, id: nextId, status: 'final' as const, ts: 0 }
+    if (db.company.courier?.autoBook && dealer?.courier && db.company.courier.provider !== 'manual') {
+      const req = parcelDefaults(db, saved)
+      if (!req.phone || !req.address) return toast(`Courier not booked: ${dealer.name} has no phone or address`)
+      courier.book(req, { invoice: saved }).then(
+        (id) => toast(`Courier booked for ${nextId} · ${id}`),
+        (e: unknown) => toast(`Courier not booked: ${e instanceof Error ? e.message : 'try again from the invoice'}`),
+      )
+    }
   }
 
   const recent = useMemo(

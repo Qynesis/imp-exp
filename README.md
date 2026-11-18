@@ -50,6 +50,7 @@ src/
   ui/                      design system: buttons, cards, tables, forms, sheets, toasts
   components/              widgets shared by several screens
   features/<area>/         one folder per screen: index.tsx plus its sheets
+  i18n/                    English / Bangla switch and the Bangla dictionary
   styles/                  tokens, layout, components, screens, responsive, print
   config/brand.ts          brand name, "Powered by", default logo
 ```
@@ -63,6 +64,18 @@ src/
    code splitting all follow from that entry.
 
 New data goes in `Db` (`types.ts`), changes to it in `actions.ts`, and derived numbers in `calc/`.
+
+### English and Bangla
+
+The language switch (sidebar, phone menu and sign-in page) is remembered per device. Screens are
+written in English; `src/i18n/` shows them in Bangla without touching the components:
+
+- `bnPhrases.ts`: English phrase → Bangla, exactly as the screens write it. Add a line when you add a label.
+- `bn.ts`: patterns for text with numbers, dates and money in it (`18 days left`, `Tk 4.4 L`, month names).
+- `translator.ts`: swaps the text on the page and restores the English when switching back. Names,
+  amounts and invoice numbers are data and stay as typed. Mark an element `data-no-translate` to skip it.
+
+The Bangla code is its own chunk, downloaded only by people who choose Bangla.
 
 ### Performance
 

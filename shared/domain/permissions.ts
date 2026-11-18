@@ -10,6 +10,7 @@ export const PAGES: readonly (readonly [PageId, string])[] = [
   ['products', 'Products and stock'],
   ['raw-materials', 'Raw materials'],
   ['transport', 'Transport'],
+  ['courier', 'Courier'],
   ['sell', 'Sell to dealer'],
   ['dealers', 'Dealers'],
   ['sales-analytics', 'Sales analytics'],
@@ -55,6 +56,8 @@ const INHERITS: Partial<Record<PageId, PageId[]>> = {
   'sales-analytics': ['reports'],
   // stock people book trips, the accountant enters what transport costs
   transport: ['products', 'cashbook'],
+  // whoever sells or arranges delivery books parcels
+  courier: ['sell', 'transport'],
 }
 
 export const isAdmin = (db: Pick<Db, 'users' | 'roles'>, userId: string): boolean => levelFor(db, userId, 'settings') === 'edit'

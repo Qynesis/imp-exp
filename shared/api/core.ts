@@ -10,9 +10,10 @@
  *   books:<id>        {version, db}                    that company's books
  */
 import { applyBusinessTypes, isBusinessType } from '../domain/catalog'
+import { bookParcel, COURIER_PROVIDERS, courierAreas, courierBalance, CourierError, FIELDS, parcelStatus, testCourier, trackParcel, type BookRequest, type CourierKeys } from '../courier'
 import { isAdmin, OWNER_ROLE_ID } from '../domain/permissions'
 import { demoDb, emptyDb } from '../domain/seed'
-import { isDb, type Db } from '../domain/types'
+import { isDb, type CourierProvider, type Db } from '../domain/types'
 import type { CompanySummary, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
 
 /* ---------- ports ---------- */
@@ -73,6 +74,8 @@ export interface ApiOptions {
   /** Browser-only mode lists the platform owner among the demo logins. */
   listPlatformInDemo?: boolean
   local?: boolean
+  /** Courier keys from the server's environment, per courier. They win over keys saved in the app and never reach a browser. */
+  courier?: Partial<Record<CourierProvider, Omit<CourierKeys, 'provider'>>>
 }
 
 export interface ApiRequest {
@@ -206,6 +209,34 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     ctx.tenant.version = base + 1
     if (!(await store.cas('books:' + ctx.acc.tenantId, base, ctx.tenant))) throw new ApiFailure(409, 'Someone else changed the books.')
   }
+  /** Anyone allowed to change something in the books may book a parcel. */
+  const needEditor = (ctx: Ctx) => {
+    const me = ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)
+    const role = me && ctx.tenant.db.roles.find((r) => r.id === me.roleId)
+    if (!role || (role.id !== OWNER_ROLE_ID && !Object.values(role.perms).includes('edit'))) throw new ApiFailure(403, 'Your role is view-only.')
+  }
+  /** A courier's keys: the server's environment first, then what an admin saved for this company. */
+  const keysFor = async (ctx: Ctx, provider: CourierProvider): Promise<CourierKeys> => {
+    const env = opts.courier?.[provider]
+    if (env && Object.entries(env).some(([k, v]) => k !== 'baseUrl' && v)) return { provider, ...env }
+    const saved = (await store.get<Omit<CourierKeys, 'provider'>>(`courier:${ctx.acc.tenantId}:${provider}`)) ||
+      // keys saved before several couriers were supported belonged to Steadfast
+      (provider === 'steadfast' ? await store.get<Omit<CourierKeys, 'provider'>>('courier:' + ctx.acc.tenantId) : null) || {}
+    return { provider, ...saved }
+  }
+  const withKeys = async <T,>(ctx: Ctx, asked: unknown, run: (k: CourierKeys) => Promise<T>): Promise<T> => {
+    const provider = (COURIER_PROVIDERS.includes(asked as CourierProvider) ? asked : ctx.tenant.db.company.courier?.provider || 'demo') as CourierProvider
+    return run(await keysFor(ctx, provider))
+  }
+  /** Courier failures become a clear message for the person, not a server error. */
+  const courierCall = async <T,>(run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run()
+    } catch (e) {
+      if (e instanceof CourierError) throw new ApiFailure(502, e.message)
+      throw e
+    }
+  }
   const emailTaken = async (email: string) => email === PLATFORM || !!(await store.get('account:' + email))
 
   // slow down password guessing: 8 failed sign-ins per client and address per 10 minutes
@@ -318,6 +349,80 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       ctx.tenant.db = next
       await saveBooks(ctx)
       return { version: ctx.tenant.version }
+    },
+
+    /* ----- courier ----- */
+    'GET courier/settings': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const hint = (x?: string) => (x ? `•••• ${x.slice(-4)}` : '')
+      const out: Record<string, { hints: Record<string, string>; configured: boolean; fromServer: boolean }> = {}
+      for (const p of COURIER_PROVIDERS) {
+        const env = opts.courier?.[p]
+        const fromServer = !!env && Object.values(env).some(Boolean)
+        const k = await keysFor(ctx, p)
+        const hints: Record<string, string> = {}
+        for (const f of FIELDS[p]) hints[f.key] = f.key === 'baseUrl' || f.key === 'storeId' || f.key === 'username' ? k[f.key] || '' : hint(k[f.key])
+        out[p] = { hints, configured: FIELDS[p].every((f) => f.key === 'baseUrl' || !!k[f.key]), fromServer }
+      }
+      return out
+    },
+    'PUT courier/settings': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const b = obj(req.body)
+      const provider = str(b.provider) as CourierProvider
+      if (!COURIER_PROVIDERS.includes(provider)) throw bad('Which courier?')
+      const key = `courier:${ctx.acc.tenantId}:${provider}`
+      const cur = (await store.get<Omit<CourierKeys, 'provider'>>(key)) || {}
+      const values = obj(b.values)
+      // an empty box keeps what was saved; `clear` removes everything for this courier
+      const next: Omit<CourierKeys, 'provider'> = {}
+      if (!b.clear) for (const f of FIELDS[provider]) next[f.key] = str(values[f.key]).trim() || (f.key === 'baseUrl' ? '' : cur[f.key] || '')
+      await store.set(key, next)
+      await store.audit(`courier ${provider} keys ${b.clear ? 'removed' : 'saved'} for ${ctx.acc.tenantId}`)
+      return { ok: true }
+    },
+    'POST courier/book': async (req) => {
+      const ctx = await auth(req)
+      needEditor(ctx)
+      const b = obj(req.body)
+      const r: BookRequest = {
+        invoice: str(b.invoice), name: str(b.name), phone: str(b.phone), address: str(b.address), cod: Number(b.cod) || 0, note: str(b.note),
+        weight: Number(b.weight) || undefined, quantity: Number(b.quantity) || undefined, cityId: str(b.cityId), zoneId: str(b.zoneId), areaId: str(b.areaId), areaName: str(b.areaName),
+      }
+      if (!r.invoice || !r.name || !r.phone || !r.address) throw bad('Name, phone and address are needed to book a parcel.')
+      return courierCall(() => withKeys(ctx, b.provider, (k) => bookParcel(k, r)))
+    },
+    'POST courier/status': async (req) => {
+      const ctx = await auth(req)
+      const b = obj(req.body)
+      const id = str(b.consignmentId)
+      if (!id) throw bad('Which parcel?')
+      return courierCall(async () => ({ status: await withKeys(ctx, b.provider, (k) => parcelStatus(k, id)) }))
+    },
+    'POST courier/track': async (req) => {
+      const ctx = await auth(req)
+      const b = obj(req.body)
+      const code = str(b.code).trim()
+      if (!code) throw bad('Enter a tracking code or consignment number.')
+      return courierCall(() => withKeys(ctx, b.provider, (k) => trackParcel(k, code)))
+    },
+    'POST courier/areas': async (req) => {
+      const ctx = await auth(req)
+      const b = obj(req.body)
+      return courierCall(async () => ({ areas: await withKeys(ctx, b.provider, (k) => courierAreas(k, str(b.parentId))) }))
+    },
+    'POST courier/balance': async (req) => {
+      const ctx = await auth(req)
+      const b = obj(req.body)
+      return courierCall(async () => ({ balance: await withKeys(ctx, b.provider, (k) => courierBalance(k)) }))
+    },
+    'POST courier/test': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const b = obj(req.body)
+      return courierCall(async () => ({ message: await withKeys(ctx, b.provider, (k) => testCourier(k)) }))
     },
 
     'POST users': async (req) => {

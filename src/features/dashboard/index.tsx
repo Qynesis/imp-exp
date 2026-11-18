@@ -30,6 +30,9 @@ export default function DashboardPage() {
   const open = db.factoryOrders.map((o) => ({ o, c: foCalc(db, o) })).filter((x) => x.c.pending > 0)
   const vsYesterday = change(book.today.value, book.yesterday.value)
   const can = (p: Parameters<typeof level>[0]) => level(p) !== 'none'
+  /** A card opens its screen only for people allowed to see it. */
+  const link = (p: Parameters<typeof level>[0]) => (can(p) ? href(p) : undefined)
+  const salesTo = can('sales-analytics') ? href('sales-analytics') : link('sell')
 
   return (
     <>
@@ -42,12 +45,12 @@ export default function DashboardPage() {
       } />
 
       <div className="stats">
-        <Stat icon="receipt" label="Sales today" value={tk(book.today.value)}
+        <Stat href={salesTo} icon="receipt" label="Sales today" value={tk(book.today.value)}
           sub={<>{plural(book.today.orders, 'order')}{vsYesterday != null && <> · <b className={vsYesterday >= 0 ? 't-good' : 't-warn'}>{vsYesterday >= 0 ? '↑' : '↓'} {pct(Math.abs(vsYesterday))}</b> vs yesterday</>}</>} />
-        <Stat icon="trend" label="Orders this month" value={tk(book.month.value)}
+        <Stat href={salesTo} icon="trend" label="Orders this month" value={tk(book.month.value)}
           sub={`${plural(book.month.orders, 'order')}${book.target ? ` · ${pct(book.month.value / book.target)} of target` : ''} · profit ${tkShort(book.month.profit)}`} />
-        <Stat icon="arrowIn" label="Owed to us (dealers)" value={tk(rec.total)} tone={rec.total > 0 ? 'good' : undefined} sub={rec.rows.length ? `${plural(rec.rows.length, 'dealer')}, ${rec.rows.filter((r) => r.overdue).length} overdue` : 'No dues'} />
-        <Stat icon="arrowOut" label="We owe" value={tk(pay.total)} tone={pay.total > 0 ? 'warn' : undefined} sub={pay.rows.length ? `${plural(pay.rows.length, 'bill')} · suppliers, factories, transport` : 'Nothing to pay'} />
+        <Stat href={link('cashbook')} icon="arrowIn" label="Owed to us (dealers)" value={tk(rec.total)} tone={rec.total > 0 ? 'good' : undefined} sub={rec.rows.length ? `${plural(rec.rows.length, 'dealer')}, ${rec.rows.filter((r) => r.overdue).length} overdue` : 'No dues'} />
+        <Stat href={link('cashbook')} icon="arrowOut" label="We owe" value={tk(pay.total)} tone={pay.total > 0 ? 'warn' : undefined} sub={pay.rows.length ? `${plural(pay.rows.length, 'bill')} · suppliers, factories, transport` : 'Nothing to pay'} />
       </div>
 
       <RecentSales />
@@ -56,11 +59,11 @@ export default function DashboardPage() {
         <>
           <h2 className="dash-h"><Icon name="ship" size={20} />Imports and exports</h2>
           <div className="stats">
-            <Stat icon="ship" label="Open import LCs" value={fmt(trade.imports.length)} sub={`${usd(trade.importUsd)} · ${tkShort(trade.importTk)}`} />
-            <Stat icon="calendar" label="Arriving this week" value={fmt(trade.arriving.length)} tone={trade.arriving.some((r) => (r.daysTo ?? 0) < 0) ? 'warn' : undefined}
+            <Stat href={link('imports')} icon="ship" label="Open import LCs" value={fmt(trade.imports.length)} sub={`${usd(trade.importUsd)} · ${tkShort(trade.importTk)}`} />
+            <Stat href={link('imports')} icon="calendar" label="Arriving this week" value={fmt(trade.arriving.length)} tone={trade.arriving.some((r) => (r.daysTo ?? 0) < 0) ? 'warn' : undefined}
               sub={trade.arriving.length ? trade.arriving.slice(0, 2).map((r) => `${r.s.id} ${r.daysTo! < 0 ? 'late' : fshort(r.expected)}`).join(' · ') : 'Nothing due in 7 days'} />
-            <Stat icon="arrowOut" label="Exports in progress" value={usd(trade.exportUsd)} sub={trade.awaitingPayment.length ? `${usd(trade.awaitingUsd)} shipped, payment not realised` : `${plural(trade.exports.length, 'order')}`} />
-            <Stat icon="shield" label="Customs" value={tk(trade.dutyDue + trade.demurrage)} tone={trade.demurrage > 0 || trade.docsMissing > 0 ? 'warn' : undefined}
+            <Stat href={link('imports')} icon="arrowOut" label="Exports in progress" value={usd(trade.exportUsd)} sub={trade.awaitingPayment.length ? `${usd(trade.awaitingUsd)} shipped, payment not realised` : `${plural(trade.exports.length, 'order')}`} />
+            <Stat href={link('customs')} icon="shield" label="Customs" value={tk(trade.dutyDue + trade.demurrage)} tone={trade.demurrage > 0 || trade.docsMissing > 0 ? 'warn' : undefined}
               sub={`Duty ${tkShort(trade.dutyDue)}${trade.demurrage ? ` · demurrage ${tkShort(trade.demurrage)}` : ''}${trade.docsMissing ? ` · ${trade.docsMissing} documents missing` : ''}`} />
           </div>
 

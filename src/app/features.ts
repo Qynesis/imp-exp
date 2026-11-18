@@ -42,6 +42,7 @@ export const FEATURES: FeatureDef[] = [
   { id: 'sell', icon: 'receipt', label: 'Sell to dealer', group: 'Selling', tab: { label: 'Sell' }, hasDetail: true, load: () => import('@/features/sales') },
   { id: 'dealers', icon: 'users', label: 'Dealers', group: 'Selling', tab: { label: 'Dealers' }, load: () => import('@/features/dealers') },
   { id: 'sales-analytics', icon: 'trend', label: 'Sales analytics', group: 'Selling', load: () => import('@/features/sales-analytics') },
+  { id: 'courier', icon: 'parcel', label: 'Courier', group: 'Selling', load: () => import('@/features/courier') },
   { id: 'cashbook', icon: 'wallet', label: 'Cashbook and dues', group: 'Money', tab: { label: 'Cash' }, load: () => import('@/features/cashbook') },
   { id: 'employees', icon: 'badge', label: 'Employees', group: 'Money', load: () => import('@/features/employees') },
   { id: 'reports', icon: 'chart', label: 'Reports', group: 'Money', load: () => import('@/features/reports') },

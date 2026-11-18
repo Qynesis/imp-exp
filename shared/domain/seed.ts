@@ -107,6 +107,18 @@ export function demoDb(): Db {
     settled('FO-1030', 'f3', 2, 'inner', 3000, 6, 48, []),
   ]
 
+  // FO-1042 went up from 40 to 50 cartons while the factory was working; one shipment came in with freight
+  const fo42 = db.factoryOrders.find((o) => o.id === 'FO-1042')
+  if (fo42) {
+    fo42.amendments = [{ id: 'am1', ts: t(), date: d(12), fromQty: 40, toQty: 50, fromRate: 1200, toRate: 1200, reason: 'Dealer demand up before winter, factory agreed 10 more' }]
+    if (fo42.receipts[0]) Object.assign(fo42.receipts[0], { freight: 3500, freightInCost: true })
+  }
+  db.estimates = [
+    { id: 'EST-103', ts: t(), date: d(1), factoryId: 'f2', type: 2, productId: 'pouch', qty: 1500, rate: 148, wanted: d(-20), validUntil: d(-10), materials: [], note: 'Same pouch print as last lot', status: 'draft' },
+    { id: 'EST-102', ts: t(), date: d(4), factoryId: 'f1', type: 1, productId: 'coil', qty: 60, rate: 1150, wanted: d(-25), validUntil: '', materials: [{ productId: 'powder', given: 600 }, { productId: 'inner', given: 3600 }, { productId: 'master', given: 60 }], note: '', status: 'sent', sentOn: d(3) },
+    { id: 'EST-101', ts: t(), date: d(9), factoryId: 'f3', type: 2, productId: 'inner', qty: 6000, rate: 6, wanted: d(-12), validUntil: '', materials: [], note: 'Inner boxes, 2-colour print', status: 'approved', sentOn: d(8), answeredOn: d(6), answer: 'Approved at Tk 6, delivery in two lots' },
+  ]
+
   db.suppliers = [
     { id: 's1', name: 'Eastern Chem Supply', contact: '', phone: '', address: '', goods: 'Coil powder mix, chemicals', terms: 'credit', days: 30, opening: 0 },
     { id: 's2', name: 'Sagorika Trading', contact: '', phone: '', address: '', goods: 'Crude soyabean oil', terms: 'credit', days: 15, opening: 0 },
@@ -224,8 +236,26 @@ export function demoDb(): Db {
   ]
 
   db.company.salesTarget = 3000000
+  db.company.courier = { provider: 'demo', autoBook: false }
+  const madina = db.dealers.find((x) => x.id === 'd5')
+  if (madina) Object.assign(madina, { courier: true, phone: '01812-447090', owner: 'Abdul Kader', address: 'Shop 14, Port Connecting Road' })
+  // two parcels sent through the demo courier: one delivered, one still on the way
+  const sent = db.invoices.filter((i) => i.dealerId === 'd5' && i.status === 'final').slice(-2)
+  db.parcels = sent.map((inv, k) => {
+    const date = inv.date
+    const delivered = k === 0
+    const total = inv.lines.reduce((s, l) => s + l.qty * l.price, 0) - (inv.discount || 0)
+    return {
+      id: 'pc' + (k + 1), ts: t(), date, invoiceId: inv.id, dealerId: 'd5', provider: 'demo' as const,
+      // a demo consignment number carries its booking time, which drives its status
+      consignmentId: `DEMO-${(Date.now() - (delivered ? 86400000 * 3 : 120000)).toString(36).toUpperCase()}`, trackingCode: `DM${inv.id.replace(/\W/g, '')}`, trackingUrl: '',
+      status: delivered ? 'delivered' : 'in_review', cod: delivered ? 0 : total, recipientName: 'Abdul Kader (Madina General Store)', phone: '01812-447090',
+      address: 'Shop 14, Port Connecting Road, Halishahar', note: inv.lines.map((l) => `${l.qty} ${l.unit}`).join(', '),
+      history: delivered ? [{ date, status: 'in_review' }, { date, status: 'in_transit' }, { date: T, status: 'delivered' }] : [{ date, status: 'in_review' }],
+    }
+  })
   for (const [id, target] of [['e4', 1500000], ['e5', 1200000]] as const) (db.employees.find((e) => e.id === id) as Employee).salesTarget = target
-  db.seq = { id: 1000, ts, fo: 1043, inv: 2312, imp: 16, exp: 2, pb: 222 }
+  db.seq = { id: 1000, ts, fo: 1043, inv: 2312, imp: 16, exp: 2, pb: 222, est: 104 }
   ts = addTransportHistory(db, T, ts)
   applyBusinessTypes(db, ['food'])
   // choose the opening cash so that today opens at Tk 4,10,000

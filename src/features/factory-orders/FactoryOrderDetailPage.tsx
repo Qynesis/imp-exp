@@ -3,7 +3,13 @@ import { CustomView } from '@/components/CustomFields'
 import { PageHead } from '@/components/PageHead'
 import { useBooks } from '@/core/store/context'
 import { PaySheet } from '@/features/payments/PaySheet'
-import { Button, Card, DataTable, Empty, Pill, Progress, Stat, useSheets } from '@/ui'
+import { shareOnWhatsApp } from '@/components/share'
+import { Button, Card, DataTable, Empty, Pill, Progress, usePrint, useSheets } from '@/ui'
+import { OrderProgress } from './OrderProgress'
+import { OrderStatementDoc } from './orderDocs'
+import { orderStatementText } from './orderText'
+import { AmendOrderSheet } from './sheets/AmendOrderSheet'
+import { EstimateDetailSheet } from './sheets/EstimateDetailSheet'
 import { FactoryBillSheet } from './sheets/FactoryBillSheet'
 import { ReceiveShipmentSheet } from './sheets/ReceiveShipmentSheet'
 import { TripSheet } from '@/features/transport/sheets/TripSheet'
@@ -36,6 +42,7 @@ const balanceText = (b: number) => (b > 0 ? `Factory owes us ${tk(b)}` : b < 0 ?
 export function FactoryOrderDetailPage({ id }: { id: string }) {
   const { db } = useBooks()
   const sheets = useSheets()
+  const print = usePrint()
   const o = byId(db.factoryOrders, id)
   if (!o) {
     return (
@@ -64,24 +71,18 @@ export function FactoryOrderDetailPage({ id }: { id: string }) {
         back={{ to: 'factory-orders', label: 'Factory orders' }}
         title={`${o.id} · ${c.product?.name}`}
         pill={<Pill tone={c.tone}>{c.status}</Pill>}
-        sub={`${c.factory?.name} · Type ${o.type}, ${c.typeLabel.toLowerCase()} · Placed ${fdate(o.placed)}`}
+        sub={<>{c.factory?.name} · Type {o.type}, {c.typeLabel.toLowerCase()} · Placed {fdate(o.placed)}{o.estimateId && <> · from <button type="button" className="link" onClick={() => sheets.open(EstimateDetailSheet, { estimateId: o.estimateId as string })}>{o.estimateId}</button></>}</>}
         actions={
           <>
-            <Button variant="secondary" onClick={() => sheets.open(FactoryBillSheet, { orderId: o.id })}>Record factory bill</Button>
+            <Button variant="secondary" icon="edit" disabled={c.pending <= 0} onClick={() => sheets.open(AmendOrderSheet, { orderId: o.id })}>Change order</Button>
+            <Button variant="secondary" icon="receipt" onClick={() => sheets.open(FactoryBillSheet, { orderId: o.id })}>Record factory bill</Button>
             <Button icon="wallet" variant="secondary" onClick={() => sheets.open(PaySheet, { kind: 'factory', orderId: o.id, crumb: 'Factory order' })}>Pay factory</Button>
             <Button variant="secondary" icon="truck" disabled={c.pending <= 0} onClick={() => sheets.open(TripSheet, { purpose: 'pickup', orderId: o.id })}>Arrange pickup</Button>
             <Button icon="arrowIn" disabled={c.pending <= 0} onClick={() => sheets.open(ReceiveShipmentSheet, { orderId: o.id })}>Receive shipment</Button>
           </>
         }
       />
-      <div className="stats">
-        <Stat icon="receipt" label="Ordered" value={`${fmt(o.qty)} ${c.unit}`} sub={`${o.type === 1 ? 'Making charge' : 'Price'} ${tk(o.rate)} per unit`} />
-        <Stat icon="arrowIn" label="Received" value={`${fmt(c.received)} ${c.unit}`} tone="good" sub={`In ${o.receipts.length} shipment${o.receipts.length === 1 ? '' : 's'}`} />
-        <Stat icon="clock" label="Still due from factory" value={`${fmt(c.pending)} ${c.unit}`} tone={c.pending > 0 ? 'warn' : undefined}
-          sub={c.pending > 0 ? (o.expected ? `Promised by ${fdate(o.expected)}` : 'No delivery date set') : 'Everything has arrived'} />
-        <Stat icon="money" label="Money balance" value={tk(Math.abs(c.balance))} tone={c.balance > 0 ? 'good' : c.balance < 0 ? 'warn' : undefined}
-          sub={c.balance > 0 ? 'Factory owes us (advance not yet used)' : c.balance < 0 ? 'We owe the factory' : c.billed ? 'Settled' : 'Nothing billed yet'} />
-      </div>
+      <OrderProgress db={db} o={o} />
 
       <div className="grid2">
         <Card title="Goods received">
@@ -100,13 +101,29 @@ export function FactoryOrderDetailPage({ id }: { id: string }) {
               { label: 'Date', primary: true, render: (r) => (r.pending ? (o.expected ? `By ${fdate(o.expected)}` : 'Pending') : fdate(r.date)) },
               { label: 'Challan', render: (r) => (r.pending ? 'Not shipped yet' : `${r.challan || 'No challan'} · Shipment ${r.n}`) },
               { label: 'Quantity', align: 'right', render: (r) => (r.pending ? <b>{fmt(c.pending)} {c.unit}</b> : `${fmt(r.qty)} ${c.unit}${r.damaged ? ` (+${fmt(r.damaged)} rejected)` : ''}`) },
+              { label: 'Freight', align: 'right', render: (r) => (r.pending || !r.freight ? '' : <span className="two-line right"><span>{tk(r.freight)}</span><small className="t-muted">{r.freightInCost ? 'In product cost' : 'Expense only'}</small></span>) },
               { label: 'Factory bill', align: 'right', render: (r) => (r.pending || !r.bill ? 'Not billed yet' : `${r.bill.billNo} · ${tk(r.bill.amount)}`) },
             ]}
           />
+          {c.freight > 0 && <p className="card-body t-muted small-note">Freight to warehouse so far {tk(c.freight)}{c.freightInCost ? `, of which ${tk(c.freightInCost)} is in the product cost` : ''}.</p>}
         </Card>
 
+        {(o.amendments?.length ?? 0) > 0 && (
+          <Card icon="edit" title="Order changes" sub="Every change made while the factory was working.">
+            <div className="rows">
+              {o.amendments!.map((a) => (
+                <div key={a.id} className="row">
+                  <span className="two-line"><span className="name normal">{fmt(a.fromQty)} → <b>{fmt(a.toQty)}</b> {c.unit}{a.fromRate !== a.toRate ? ` · rate ${tk(a.fromRate)} → ${tk(a.toRate)}` : ''}</span><small className="t-muted">{a.reason}</small></span>
+                  <span className="meta">{fdate(a.date)}</span>
+                  <span className="amt">{a.toQty > a.fromQty ? `+${fmt(a.toQty - a.fromQty)}` : a.toQty < a.fromQty ? `−${fmt(a.fromQty - a.toQty)}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
         {o.type === 1 && (
-          <Card title="Our raw materials at the factory" sub="Bought by us and handed over for this order. Settle what is left: take it back or write it off.">
+          <Card className="span-all" title="Our raw materials at the factory" sub="Bought by us and handed over for this order. Settle what is left: take it back or write it off.">
             <DataTable
               rows={c.materials}
               rowKey={(r) => r.productId}
@@ -126,7 +143,12 @@ export function FactoryOrderDetailPage({ id }: { id: string }) {
       </div>
 
       <CustomView entity="factoryOrder" record={o} />
-      <Card title="Money ledger with this factory" sub="Each payment and each bill moves the balance, so it always shows who owes whom.">
+      <Card icon="wallet" title="Payment history for this lot" sub="Each payment and each bill moves the balance, so it always shows who owes whom. Pay any amount, any time."
+        action={<div className="btn-row tight-row">
+          <Button size="sm" variant="secondary" icon="print" onClick={() => print(<OrderStatementDoc db={db} o={o} />)}>Print</Button>
+          <Button size="sm" variant="secondary" icon="send" onClick={() => shareOnWhatsApp(orderStatementText(db, o), c.factory?.phone)}>WhatsApp</Button>
+          <Button size="sm" icon="wallet" className="edit-only" onClick={() => sheets.open(PaySheet, { kind: 'factory', orderId: o.id, crumb: 'Factory order' })}>Add payment</Button>
+        </div>}>
         <DataTable
           rows={ledger}
           rowClass={(r) => r.expected && 'expected-row'}

@@ -25,6 +25,11 @@ export const apiOptions = (): ApiOptions => ({
   platformPassword: env('PLATFORM_ADMIN_PASSWORD'),
   demo: env('DEMO_ACCOUNTS') === '1',
   demoPassword: env('DEMO_PASSWORD') || 'demo1234',
+  courier: {
+    steadfast: { apiKey: env('STEADFAST_API_KEY') || env('COURIER_API_KEY'), secretKey: env('STEADFAST_SECRET_KEY') || env('COURIER_SECRET_KEY'), baseUrl: env('STEADFAST_BASE_URL') },
+    pathao: { apiKey: env('PATHAO_CLIENT_ID'), secretKey: env('PATHAO_CLIENT_SECRET'), username: env('PATHAO_USERNAME'), password: env('PATHAO_PASSWORD'), storeId: env('PATHAO_STORE_ID'), baseUrl: env('PATHAO_BASE_URL') },
+    redx: { apiKey: env('REDX_TOKEN'), baseUrl: env('REDX_BASE_URL') },
+  },
 })
 
 /** Postgres when DATABASE_URL is set; files on disk otherwise (or a clear error where there is no disk). */

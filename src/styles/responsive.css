@@ -99,3 +99,10 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0s !important; transition-duration: 0.01ms !important; }
 }
+
+/* phones: a card's buttons go under its title instead of squeezing it */
+@media (max-width: 719px) {
+  .card-head { flex-wrap: wrap; }
+  .card-head > :last-child:not(.card-head-text):not(.icon-badge) { flex-basis: 100%; }
+  .card-head .btn-row { justify-content: flex-start; }
+}
