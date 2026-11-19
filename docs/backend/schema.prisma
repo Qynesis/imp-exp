@@ -1,0 +1,1650 @@
+// Star Bangla Trading: PostgreSQL schema for the NestJS backend.
+// Explained in 02-database-prisma.md. Every business table has `tenantId`; money is Decimal(14,2),
+// quantities Decimal(14,3), business days are DATE, moments are timestamptz.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * ======================================================================= enums
+ */
+
+enum TenantStatus {
+  active
+  suspended
+}
+
+enum BusinessType {
+  general
+  food
+  machinery
+  electronics
+  toys
+  medical
+}
+
+enum CustomEntity {
+  product
+  supplier
+  dealer
+  shipment
+  factoryOrder
+}
+
+enum FieldType {
+  text
+  number
+  date
+  select
+}
+
+enum ProductKind {
+  finished
+  raw
+  packaging
+}
+
+enum ProductSource {
+  supplier
+  import
+  factory
+  workshop
+}
+
+enum StockMoveKind {
+  opening
+  adjustment
+  purchase
+  import_in
+  export_out
+  factory_material_out
+  factory_material_back
+  factory_receipt
+  production_in
+  production_material_out
+  delivery
+  delivery_undo
+  return_in
+}
+
+/// 1 in the app: we supply raw materials and pay a making charge. 2: the factory supplies everything.
+enum FactoryOrderType {
+  material_supplied
+  direct
+}
+
+enum EstimateStatus {
+  draft
+  sent
+  approved
+  rejected
+  ordered
+}
+
+enum SettlementKind {
+  returned
+  wasted
+}
+
+enum SupplierTerms {
+  credit
+  cash
+}
+
+enum Direction {
+  inbound  @map("import")
+  outbound @map("export")
+}
+
+enum DealerTerms {
+  credit
+  cod
+}
+
+enum InvoiceStatus {
+  draft
+  final
+}
+
+enum QuoteStatus {
+  draft
+  sent
+  approved
+  rejected
+  invoiced
+}
+
+enum DeliveryVia {
+  own
+  courier
+  pickup
+  hired
+}
+
+enum ReturnCondition {
+  restock
+  damaged
+}
+
+enum MessageKind {
+  estimate
+  invoice
+  payment
+  reminder
+  occasional
+  delivery
+}
+
+enum MessageChannel {
+  whatsapp
+  sms
+}
+
+enum MessageStatus {
+  queued
+  sent
+  opened
+  failed
+}
+
+enum VehicleType {
+  truck
+  covered_van @map("covered-van")
+  pickup
+  van
+  motorcycle
+  boat
+  other
+}
+
+enum VehicleOwnership {
+  own
+  rented
+}
+
+enum PaperKey {
+  fitness
+  taxToken
+  insurance
+  routePermit
+  license
+}
+
+enum TripPurpose {
+  delivery
+  pickup
+  transfer
+  other
+}
+
+enum TripStatus {
+  planned
+  on_the_way @map("on-the-way")
+  done
+  cancelled
+}
+
+enum TransportCostKind {
+  fuel              @map("Fuel")
+  hire_charge       @map("Hire charge")
+  freight_warehouse @map("Freight to warehouse")
+  vehicle_rent      @map("Vehicle rent")
+  driver_allowance  @map("Driver allowance")
+  loading           @map("Loading and unloading")
+  toll_parking      @map("Toll and parking")
+  repair            @map("Repair")
+  servicing         @map("Servicing")
+  tyres_parts       @map("Tyres and parts")
+  papers_tax        @map("Papers and tax")
+  insurance         @map("Insurance")
+  other             @map("Other")
+}
+
+enum CourierProvider {
+  steadfast
+  pathao
+  redx
+  manual
+  demo
+}
+
+enum PayType {
+  salary
+  sales
+}
+
+enum CommissionOn {
+  sales
+  collection
+}
+
+enum PayrollKind {
+  salary
+  commission
+}
+
+enum DepreciationMethod {
+  straight
+  declining
+  none
+}
+
+enum AssetStatus {
+  active
+  disposed
+}
+
+enum InvestorStatus {
+  active
+  exited
+}
+
+enum InvestorTxnKind {
+  invest
+  withdraw
+  share
+  payout
+  reinvest
+}
+
+enum SubscriptionPlan {
+  trial
+  free
+  quarterly
+  half_yearly @map("half-yearly")
+  yearly
+}
+
+enum SubscriptionPayMethod {
+  online
+  bkash
+  nagad
+  rocket
+  bank
+  test
+}
+
+enum SubscriptionPayStatus {
+  started
+  pending
+  paid
+  rejected
+  failed
+  cancelled
+}
+
+enum IntegrationKind {
+  courier
+  messaging
+}
+
+/**
+ * ======================================================================= platform, tenants, people
+ */
+
+/// One company. Holds the company profile (`Company` in types.ts) and settings.
+model Tenant {
+  id                String         @id @default(uuid()) @db.Uuid
+  status            TenantStatus   @default(active)
+  name              String
+  tagline           String         @default("")
+  phone             String         @default("")
+  address           String         @default("")
+  invoicePrefix     String         @default("")
+  invoiceNote       String         @default("")
+  logoUrl           String         @default("")
+  salesTarget       Decimal?       @db.Decimal(14, 2)
+  openingCash       Decimal        @default(0) @db.Decimal(14, 2)
+  /// Opening money in bank and wallets, out of openingCash, e.g. Bank 290000 and bKash 35000.
+  openingAccounts   Json           @default("{}")
+  businessTypes     BusinessType[] @default([general])
+  /// CourierSettings from types.ts (provider, autoBook, enabled, testMode). Keys live in IntegrationSecret.
+  courierSettings   Json?
+  /// MessagingSettings from types.ts (whatsapp, sms, auto, reminderDays, templates, testMode, lastReminderRun).
+  messagingSettings Json?
+  /// Goes up by one on every committed change. Clients poll GET /api/books?v= with it.
+  booksVersion      Int            @default(1)
+  /// \'json\' while on Phase 1 (BooksDoc), \'relational\' after the import (08 §8.1 step 5).
+  storage           String         @default("json")
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
+
+  users            User[]
+  roles            Role[]
+  fieldDefs        FieldDef[]
+  counters         Counter[]
+  categories       Category[]
+  products         Product[]
+  stockMoves       StockMove[]
+  adjustments      StockAdjustment[]
+  productions      Production[]
+  factories        Factory[]
+  estimates        FactoryEstimate[]
+  factoryOrders    FactoryOrder[]
+  suppliers        Supplier[]
+  purchases        Purchase[]
+  supplierPayments SupplierPayment[]
+  shipments        Shipment[]
+  dealers          Dealer[]
+  quotes           SalesQuote[]
+  invoices         Invoice[]
+  deliveries       Delivery[]
+  returns          SalesReturn[]
+  collections      Collection[]
+  messages         MessageLog[]
+  expenses         Expense[]
+  vehicles         Vehicle[]
+  trips            Trip[]
+  advances         Advance[]
+  employees        Employee[]
+  payrollRuns      PayrollRun[]
+  parcels          Parcel[]
+  secrets          IntegrationSecret[]
+  audit            AuditLog[]
+  booksDoc         BooksDoc?
+  idempotency      IdempotencyKey[]
+  assets           FixedAsset[]
+  investors        Investor[]
+  investorTxns     InvestorTxn[]
+  distributions    ProfitDistribution[]
+  transfers        AccountTransfer[]
+  subscription     Subscription?
+  subPayments      SubscriptionPayment[]
+}
+
+/// The platform owner(s): see every company, open books, reset passwords. Not tied to a tenant.
+model PlatformAdmin {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  sessions     Session[]
+}
+
+/// A person who signs in. An email belongs to exactly one company (as today).
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @db.Uuid
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  email        String    @unique
+  passwordHash String
+  roleId       String    @db.Uuid
+  role         Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  employeeId   String?   @db.Uuid
+  employee     Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  disabled     Boolean   @default(false)
+  /// Original id from the JSON books (u1, u2…), kept for migration.
+  legacyId     String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  sessions     Session[] @relation("SessionUser")
+  actingAs     Session[] @relation("SessionActingAs")
+
+  @@index([tenantId])
+}
+
+/// A signed-in token, stored as its SHA-256 digest. Either a user, or the platform owner (optionally acting as a company owner).
+model Session {
+  id              String         @id @default(uuid()) @db.Uuid
+  tokenDigest     String         @unique
+  userId          String?        @db.Uuid
+  user            User?          @relation("SessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  platformAdminId String?        @db.Uuid
+  platformAdmin   PlatformAdmin? @relation(fields: [platformAdminId], references: [id], onDelete: Cascade)
+  /// "Open books": the platform owner acting as this company's owner. Short-lived (4 hours).
+  actingAsUserId  String?        @db.Uuid
+  actingAsUser    User?          @relation("SessionActingAs", fields: [actingAsUserId], references: [id], onDelete: Cascade)
+  expiresAt       DateTime       @db.Timestamptz(3)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  lastSeenAt      DateTime       @default(now()) @db.Timestamptz(3)
+  ip              String         @default("")
+  userAgent       String         @default("")
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Role {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @db.Uuid
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// 'owner', 'accountant', 'sales', 'warehouse' or a generated key. The owner role has system = true.
+  key      String
+  name     String
+  system   Boolean @default(false)
+  /// Partial<Record<PageId, 'none'|'view'|'edit'>>, read with roleLevel() from shared/domain/permissions.ts.
+  perms    Json    @default("{}")
+  users    User[]
+
+  @@unique([tenantId, key])
+}
+
+model FieldDef {
+  id       String       @id @default(uuid()) @db.Uuid
+  tenantId String       @db.Uuid
+  tenant   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entity   CustomEntity
+  label    String
+  type     FieldType
+  options  String[]     @default([])
+  position Int          @default(0)
+
+  @@index([tenantId, entity])
+}
+
+/// Per-company counters for business numbers: inv, fo, imp, exp, pb, trip, est, qt, dl, cl, rt.
+model Counter {
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  key      String
+  next     Int    @default(1)
+
+  @@id([tenantId, key])
+}
+
+/**
+ * ======================================================================= stock
+ */
+
+model Category {
+  id       String     @id @default(uuid()) @db.Uuid
+  tenantId String     @db.Uuid
+  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name     String
+  parentId String?    @db.Uuid
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children Category[] @relation("CategoryTree")
+  products Product[]
+  legacyId String?
+
+  @@index([tenantId, parentId])
+}
+
+model Product {
+  id         String          @id @default(uuid()) @db.Uuid
+  tenantId   String          @db.Uuid
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code       String          @default("")
+  name       String
+  categoryId String?         @db.Uuid
+  category   Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  kind       ProductKind     @default(finished)
+  unit       String
+  pack       String          @default("")
+  /// Cost per unit in Tk (moving average / landed cost, see 04).
+  cost       Decimal         @default(0) @db.Decimal(14, 2)
+  price      Decimal         @default(0) @db.Decimal(14, 2)
+  /// Units in the warehouse. Changed only together with a StockMove row.
+  stock      Decimal         @default(0) @db.Decimal(14, 3)
+  lowAt      Decimal         @default(0) @db.Decimal(14, 3)
+  sources    ProductSource[] @default([])
+  archived   Boolean         @default(false)
+  custom     Json            @default("{}")
+  legacyId   String?
+  createdAt  DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime        @updatedAt @db.Timestamptz(3)
+
+  suppliers           ProductSupplier[]
+  recipe              RecipeLine[]         @relation("RecipeOf")
+  usedInRecipes       RecipeLine[]         @relation("RecipeMaterial")
+  stockMoves          StockMove[]
+  adjustments         StockAdjustment[]
+  productions         Production[]
+  productionMaterials ProductionMaterial[]
+  estimates           FactoryEstimate[]
+  estimateMaterials   EstimateMaterial[]
+  factoryOrders       FactoryOrder[]
+  orderMaterials      OrderMaterial[]
+  settlements         MaterialSettlement[]
+  purchases           Purchase[]
+  shipments           Shipment[]
+  quoteLines          QuoteLine[]
+  invoiceLines        InvoiceLine[]
+  deliveryLines       DeliveryLine[]
+  returnLines         ReturnLine[]
+
+  @@index([tenantId, kind, archived])
+  @@index([tenantId, categoryId])
+  @@index([tenantId, name])
+}
+
+model ProductSupplier {
+  productId  String   @db.Uuid
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplierId String   @db.Uuid
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@id([productId, supplierId])
+  @@index([supplierId])
+}
+
+/// How much of a material goes into one unit of a finished product.
+model RecipeLine {
+  id         String  @id @default(uuid()) @db.Uuid
+  productId  String  @db.Uuid
+  product    Product @relation("RecipeOf", fields: [productId], references: [id], onDelete: Cascade)
+  materialId String  @db.Uuid
+  material   Product @relation("RecipeMaterial", fields: [materialId], references: [id], onDelete: Restrict)
+  qty        Decimal @db.Decimal(14, 3)
+
+  @@unique([productId, materialId])
+}
+
+/// Append-only stock ledger. SUM(qty) per product equals Product.stock (checked nightly, see 04 §4.2).
+model StockMove {
+  id        String        @id @default(uuid()) @db.Uuid
+  tenantId  String        @db.Uuid
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productId String        @db.Uuid
+  product   Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  date      DateTime      @db.Date
+  /// Signed: + into the warehouse, − out of it.
+  qty       Decimal       @db.Decimal(14, 3)
+  kind      StockMoveKind
+  /// Cost per unit at the time, for stock valuation history.
+  unitCost  Decimal?      @db.Decimal(14, 2)
+  /// What caused it: 'Delivery', 'Purchase', 'FactoryReceipt'… and that row's id.
+  refType   String
+  refId     String        @db.Uuid
+  /// Human reference shown in stock history: 'DL-58', 'FO-12', 'IMP-007'.
+  refNo     String        @default("")
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  createdBy String?       @db.Uuid
+
+  @@index([tenantId, productId, date])
+  @@index([tenantId, refType, refId])
+}
+
+model StockAdjustment {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  productId String   @db.Uuid
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty       Decimal  @db.Decimal(14, 3)
+  reason    String
+  note      String   @default("")
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, date])
+}
+
+/// Finished goods made in our own workshop.
+model Production {
+  id        String               @id @default(uuid()) @db.Uuid
+  tenantId  String               @db.Uuid
+  tenant    Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date      DateTime             @db.Date
+  productId String               @db.Uuid
+  product   Product              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty       Decimal              @db.Decimal(14, 3)
+  extraCost Decimal              @default(0) @db.Decimal(14, 2)
+  note      String               @default("")
+  materials ProductionMaterial[]
+  createdAt DateTime             @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, date])
+}
+
+model ProductionMaterial {
+  id           String     @id @default(uuid()) @db.Uuid
+  productionId String     @db.Uuid
+  production   Production @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  productId    String     @db.Uuid
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty          Decimal    @db.Decimal(14, 3)
+}
+
+/**
+ * ======================================================================= factory orders
+ */
+
+model Factory {
+  id        String            @id @default(uuid()) @db.Uuid
+  tenantId  String            @db.Uuid
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  contact   String            @default("")
+  phone     String            @default("")
+  address   String            @default("")
+  makes     String            @default("")
+  legacyId  String?
+  estimates FactoryEstimate[]
+  orders    FactoryOrder[]
+
+  @@index([tenantId, name])
+}
+
+model FactoryEstimate {
+  id         String             @id @default(uuid()) @db.Uuid
+  tenantId   String             @db.Uuid
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// EST-… from Counter('est').
+  no         String
+  date       DateTime           @db.Date
+  factoryId  String             @db.Uuid
+  factory    Factory            @relation(fields: [factoryId], references: [id], onDelete: Restrict)
+  type       FactoryOrderType
+  productId  String             @db.Uuid
+  product    Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty        Decimal            @db.Decimal(14, 3)
+  rate       Decimal            @db.Decimal(14, 2)
+  wanted     DateTime?          @db.Date
+  validUntil DateTime?          @db.Date
+  note       String             @default("")
+  status     EstimateStatus     @default(draft)
+  sentOn     DateTime?          @db.Date
+  answeredOn DateTime?          @db.Date
+  answer     String?
+  materials  EstimateMaterial[]
+  order      FactoryOrder?
+  createdAt  DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@unique([tenantId, no])
+  @@index([tenantId, status])
+}
+
+model EstimateMaterial {
+  id         String          @id @default(uuid()) @db.Uuid
+  estimateId String          @db.Uuid
+  estimate   FactoryEstimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  productId  String          @db.Uuid
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty        Decimal         @db.Decimal(14, 3)
+}
+
+model FactoryOrder {
+  id          String               @id @default(uuid()) @db.Uuid
+  tenantId    String               @db.Uuid
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// FO-… from Counter('fo').
+  no          String
+  factoryId   String               @db.Uuid
+  factory     Factory              @relation(fields: [factoryId], references: [id], onDelete: Restrict)
+  type        FactoryOrderType
+  productId   String               @db.Uuid
+  product     Product              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  /// Current quantity and rate; changes are kept in OrderAmendment.
+  qty         Decimal              @db.Decimal(14, 3)
+  rate        Decimal              @db.Decimal(14, 2)
+  placed      DateTime             @db.Date
+  expected    DateTime?            @db.Date
+  estimateId  String?              @unique @db.Uuid
+  estimate    FactoryEstimate?     @relation(fields: [estimateId], references: [id], onDelete: SetNull)
+  custom      Json                 @default("{}")
+  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
+  materials   OrderMaterial[]
+  receipts    FactoryReceipt[]
+  bills       FactoryBill[]
+  payments    FactoryPayment[]
+  amendments  OrderAmendment[]
+  settlements MaterialSettlement[]
+  expenses    Expense[]
+  trips       Trip[]
+
+  @@unique([tenantId, no])
+  @@index([tenantId, factoryId])
+  @@index([tenantId, placed])
+}
+
+/// Raw material handed to the factory for a type-1 order. Leaves our stock when the order is placed.
+model OrderMaterial {
+  id        String       @id @default(uuid()) @db.Uuid
+  orderId   String       @db.Uuid
+  order     FactoryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String       @db.Uuid
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  given     Decimal      @db.Decimal(14, 3)
+}
+
+/// One lot (shipment) arriving from the factory. An order can have many.
+model FactoryReceipt {
+  id            String        @id @default(uuid()) @db.Uuid
+  tenantId      String        @db.Uuid
+  orderId       String        @db.Uuid
+  order         FactoryOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date          DateTime      @db.Date
+  challan       String        @default("")
+  qty           Decimal       @db.Decimal(14, 3)
+  damaged       Decimal       @default(0) @db.Decimal(14, 3)
+  note          String        @default("")
+  freight       Decimal?      @db.Decimal(14, 2)
+  /// true: freight goes into the product's cost per unit; false: a plain transport expense only.
+  freightInCost Boolean?
+  bills         FactoryBill[]
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, orderId])
+}
+
+model FactoryBill {
+  id        String          @id @default(uuid()) @db.Uuid
+  tenantId  String          @db.Uuid
+  orderId   String          @db.Uuid
+  order     FactoryOrder    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date      DateTime        @db.Date
+  billNo    String
+  amount    Decimal         @db.Decimal(14, 2)
+  receiptId String?         @db.Uuid
+  receipt   FactoryReceipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  createdAt DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, orderId])
+}
+
+/// Advance, partial or final payment to a factory. The payment history is printed and shared on WhatsApp.
+model FactoryPayment {
+  id        String       @id @default(uuid()) @db.Uuid
+  tenantId  String       @db.Uuid
+  orderId   String       @db.Uuid
+  order     FactoryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date      DateTime     @db.Date
+  amount    Decimal      @db.Decimal(14, 2)
+  method    String
+  note      String       @default("")
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, date])
+  @@index([orderId])
+}
+
+model OrderAmendment {
+  id        String       @id @default(uuid()) @db.Uuid
+  tenantId  String       @db.Uuid
+  orderId   String       @db.Uuid
+  order     FactoryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date      DateTime     @db.Date
+  fromQty   Decimal      @db.Decimal(14, 3)
+  toQty     Decimal      @db.Decimal(14, 3)
+  fromRate  Decimal      @db.Decimal(14, 2)
+  toRate    Decimal      @db.Decimal(14, 2)
+  reason    String
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@index([orderId])
+}
+
+model MaterialSettlement {
+  id        String         @id @default(uuid()) @db.Uuid
+  tenantId  String         @db.Uuid
+  orderId   String         @db.Uuid
+  order     FactoryOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date      DateTime       @db.Date
+  productId String         @db.Uuid
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty       Decimal        @db.Decimal(14, 3)
+  kind      SettlementKind
+  note      String         @default("")
+  createdAt DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([orderId])
+}
+
+/**
+ * ======================================================================= suppliers
+ */
+
+model Supplier {
+  id        String            @id @default(uuid()) @db.Uuid
+  tenantId  String            @db.Uuid
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  contact   String            @default("")
+  phone     String            @default("")
+  address   String            @default("")
+  goods     String            @default("")
+  terms     SupplierTerms     @default(credit)
+  days      Int               @default(0)
+  opening   Decimal           @default(0) @db.Decimal(14, 2)
+  custom    Json              @default("{}")
+  legacyId  String?
+  products  ProductSupplier[]
+  purchases Purchase[]
+  payments  SupplierPayment[]
+
+  @@index([tenantId, name])
+}
+
+model Purchase {
+  id         String            @id @default(uuid()) @db.Uuid
+  tenantId   String            @db.Uuid
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  billNo     String            @default("")
+  supplierId String            @db.Uuid
+  supplier   Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  date       DateTime          @db.Date
+  productId  String            @db.Uuid
+  product    Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty        Decimal           @db.Decimal(14, 3)
+  rate       Decimal           @db.Decimal(14, 2)
+  terms      SupplierTerms
+  payments   SupplierPayment[]
+  createdAt  DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, supplierId, date])
+  @@index([tenantId, date])
+}
+
+model SupplierPayment {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @db.Uuid
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplierId String    @db.Uuid
+  supplier   Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchaseId String?   @db.Uuid
+  purchase   Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  date       DateTime  @db.Date
+  amount     Decimal   @db.Decimal(14, 2)
+  method     String
+  note       String    @default("")
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, supplierId, date])
+  @@index([tenantId, date])
+}
+
+/**
+ * ======================================================================= import and export shipments, customs
+ */
+
+model Shipment {
+  id          String         @id @default(uuid()) @db.Uuid
+  tenantId    String         @db.Uuid
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// IMP-007 or EXP-003.
+  no          String
+  direction   Direction
+  /// Supplier abroad for imports, buyer abroad for exports.
+  party       String
+  country     String         @default("")
+  productId   String?        @db.Uuid
+  product     Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName String
+  qty         Decimal        @db.Decimal(14, 3)
+  unit        String
+  lcNo        String         @default("")
+  bank        String         @default("")
+  usd         Decimal        @default(0) @db.Decimal(14, 2)
+  /// Tk per USD.
+  rate        Decimal        @default(0) @db.Decimal(10, 4)
+  /// Cost per unit of exported goods, fixed when they leave the warehouse.
+  unitCost    Decimal?       @db.Decimal(14, 2)
+  custom      Json           @default("{}")
+  createdAt   DateTime       @default(now()) @db.Timestamptz(3)
+  costs       ShipmentCost[]
+  steps       ShipmentStep[]
+  customs     CustomsInfo?
+  trips       Trip[]
+
+  @@unique([tenantId, no])
+  @@index([tenantId, direction])
+}
+
+/// lc, shipped, port, customs, warehouse (import) or contract, ready, customs, shipped, paid (export).
+model ShipmentStep {
+  shipmentId String    @db.Uuid
+  shipment   Shipment  @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  key        String
+  date       DateTime? @db.Date
+  expected   DateTime? @db.Date
+
+  @@id([shipmentId, key])
+}
+
+model ShipmentCost {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  shipmentId String   @db.Uuid
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  date       DateTime @db.Date
+  type       String
+  amount     Decimal  @db.Decimal(14, 2)
+  method     String
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, date])
+  @@index([shipmentId])
+}
+
+model CustomsInfo {
+  shipmentId      String    @id @db.Uuid
+  shipment        Shipment  @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  tenantId        String    @db.Uuid
+  hsCode          String    @default("")
+  port            String    @default("")
+  cnf             String    @default("")
+  boeNo           String    @default("")
+  boeDate         DateTime? @db.Date
+  container       String    @default("")
+  /// Assessable value in Tk. 0 = work it out from invoice value, freight and insurance.
+  av              Decimal   @default(0) @db.Decimal(14, 2)
+  /// Partial<Record<'cd'|'rd'|'sd'|'vat'|'ait'|'at', number>> (percent).
+  rates           Json      @default("{}")
+  freeUntil       DateTime? @db.Date
+  demurragePerDay Decimal?  @db.Decimal(14, 2)
+  /// Partial<Record<CustomsStage, ISODate>>.
+  stages          Json      @default("{}")
+  /// Record<document name, received?>.
+  docs            Json      @default("{}")
+}
+
+/**
+ * ======================================================================= selling
+ */
+
+model Dealer {
+  id          String        @id @default(uuid()) @db.Uuid
+  tenantId    String        @db.Uuid
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  owner       String        @default("")
+  phone       String        @default("")
+  area        String        @default("")
+  address     String        @default("")
+  opening     Decimal       @default(0) @db.Decimal(14, 2)
+  terms       DealerTerms   @default(credit)
+  creditLimit Decimal       @default(0) @db.Decimal(14, 2)
+  days        Int           @default(0)
+  salesId     String?       @db.Uuid
+  salesPerson Employee?     @relation(fields: [salesId], references: [id], onDelete: SetNull)
+  courier     Boolean       @default(false)
+  sample      Boolean       @default(false)
+  custom      Json          @default("{}")
+  legacyId    String?
+  quotes      SalesQuote[]
+  invoices    Invoice[]
+  deliveries  Delivery[]
+  returns     SalesReturn[]
+  collections Collection[]
+  messages    MessageLog[]
+  parcels     Parcel[]
+  trips       Trip[]
+
+  @@index([tenantId, name])
+  @@index([tenantId, area])
+}
+
+model SalesQuote {
+  id         String      @id @default(uuid()) @db.Uuid
+  tenantId   String      @db.Uuid
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// QT-… from Counter('qt').
+  no         String
+  date       DateTime    @db.Date
+  dealerId   String      @db.Uuid
+  dealer     Dealer      @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  soldById   String?     @db.Uuid
+  soldBy     Employee?   @relation(fields: [soldById], references: [id], onDelete: SetNull)
+  terms      DealerTerms
+  discount   Decimal     @default(0) @db.Decimal(14, 2)
+  validUntil DateTime?   @db.Date
+  note       String      @default("")
+  status     QuoteStatus @default(draft)
+  sentOn     DateTime?   @db.Date
+  answeredOn DateTime?   @db.Date
+  answer     String?
+  invoice    Invoice?
+  lines      QuoteLine[]
+  createdAt  DateTime    @default(now()) @db.Timestamptz(3)
+
+  @@unique([tenantId, no])
+  @@index([tenantId, status])
+}
+
+model QuoteLine {
+  id        String     @id @default(uuid()) @db.Uuid
+  quoteId   String     @db.Uuid
+  quote     SalesQuote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  position  Int
+  productId String     @db.Uuid
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty       Decimal    @db.Decimal(14, 3)
+  price     Decimal    @db.Decimal(14, 2)
+}
+
+model Invoice {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @db.Uuid
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Null while a draft; invoicePrefix + Counter('inv') when made final. Never reused.
+  no              String?
+  status          InvoiceStatus @default(draft)
+  date            DateTime      @db.Date
+  dealerId        String        @db.Uuid
+  dealer          Dealer        @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  soldById        String?       @db.Uuid
+  soldBy          Employee?     @relation(fields: [soldById], references: [id], onDelete: SetNull)
+  terms           DealerTerms
+  discount        Decimal       @default(0) @db.Decimal(14, 2)
+  /// Cash taken with the bill.
+  received        Decimal       @default(0) @db.Decimal(14, 2)
+  method          String        @default("Cash")
+  /// Sum(qty × price) − discount, stored when final so reports need no join.
+  total           Decimal       @default(0) @db.Decimal(14, 2)
+  /// true on every bill made final by this backend: stock leaves on delivery, not on billing.
+  stockOnDelivery Boolean       @default(true)
+  quoteId         String?       @unique @db.Uuid
+  quote           SalesQuote?   @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  sample          Boolean       @default(false)
+  finalizedAt     DateTime?     @db.Timestamptz(3)
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+  lines           InvoiceLine[]
+  deliveries      Delivery[]
+  returns         SalesReturn[]
+  collections     Collection[]
+  parcels         Parcel[]
+  trips           Trip[]
+
+  @@unique([tenantId, no])
+  @@index([tenantId, dealerId, date])
+  @@index([tenantId, status, date])
+}
+
+model InvoiceLine {
+  id        String   @id @default(uuid()) @db.Uuid
+  invoiceId String   @db.Uuid
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  position  Int
+  productId String   @db.Uuid
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty       Decimal  @db.Decimal(14, 3)
+  price     Decimal  @db.Decimal(14, 2)
+  /// Frozen from the product when the bill is made final, so old bills keep their wording and profit.
+  name      String?
+  unit      String?
+  cost      Decimal? @db.Decimal(14, 2)
+
+  @@index([invoiceId])
+  @@index([productId])
+}
+
+/// Goods handed over against a bill (DL-…), or the rest of a bill closed without going (CL-…, cancelled = true).
+model Delivery {
+  id         String         @id @default(uuid()) @db.Uuid
+  tenantId   String         @db.Uuid
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  no         String
+  date       DateTime       @db.Date
+  invoiceId  String         @db.Uuid
+  invoice    Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  dealerId   String         @db.Uuid
+  dealer     Dealer         @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  via        DeliveryVia
+  tripId     String?        @db.Uuid
+  trip       Trip?          @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  parcelId   String?        @db.Uuid
+  parcel     Parcel?        @relation(fields: [parcelId], references: [id], onDelete: SetNull)
+  receivedBy String         @default("")
+  note       String         @default("")
+  cancelled  Boolean        @default(false)
+  /// Only with cancelled: comes off the dealer's due.
+  credit     Decimal?       @db.Decimal(14, 2)
+  sample     Boolean        @default(false)
+  lines      DeliveryLine[]
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
+  createdBy  String?        @db.Uuid
+
+  @@unique([tenantId, no])
+  @@index([tenantId, invoiceId])
+  @@index([tenantId, date])
+}
+
+model DeliveryLine {
+  id         String   @id @default(uuid()) @db.Uuid
+  deliveryId String   @db.Uuid
+  delivery   Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  productId  String   @db.Uuid
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty        Decimal  @db.Decimal(14, 3)
+
+  @@index([deliveryId])
+  @@index([productId])
+}
+
+/// Goods a dealer sent back (RT-…).
+model SalesReturn {
+  id        String          @id @default(uuid()) @db.Uuid
+  tenantId  String          @db.Uuid
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  no        String
+  date      DateTime        @db.Date
+  invoiceId String          @db.Uuid
+  invoice   Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  dealerId  String          @db.Uuid
+  dealer    Dealer          @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  condition ReturnCondition
+  /// Taken off the dealer's due. 0 when the goods are replaced instead.
+  credit    Decimal         @default(0) @db.Decimal(14, 2)
+  reason    String
+  note      String          @default("")
+  sample    Boolean         @default(false)
+  lines     ReturnLine[]
+  createdAt DateTime        @default(now()) @db.Timestamptz(3)
+  createdBy String?         @db.Uuid
+
+  @@unique([tenantId, no])
+  @@index([tenantId, invoiceId])
+  @@index([tenantId, dealerId, date])
+}
+
+model ReturnLine {
+  id        String      @id @default(uuid()) @db.Uuid
+  returnId  String      @db.Uuid
+  return    SalesReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  productId String      @db.Uuid
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  qty       Decimal     @db.Decimal(14, 3)
+  price     Decimal     @db.Decimal(14, 2)
+}
+
+/// Money collected from a dealer. Pays the chosen bill first, then the oldest (see 04 §4.6).
+model Collection {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @db.Uuid
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date          DateTime  @db.Date
+  dealerId      String    @db.Uuid
+  dealer        Dealer    @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  invoiceId     String?   @db.Uuid
+  invoice       Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  amount        Decimal   @db.Decimal(14, 2)
+  method        String
+  collectedById String?   @db.Uuid
+  collectedBy   Employee? @relation(fields: [collectedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, dealerId, date])
+  @@index([tenantId, date])
+}
+
+/**
+ * ======================================================================= messages
+ */
+
+model MessageLog {
+  id                String         @id @default(uuid()) @db.Uuid
+  tenantId          String         @db.Uuid
+  tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date              DateTime       @db.Date
+  kind              MessageKind
+  channel           MessageChannel
+  to                String
+  dealerId          String?        @db.Uuid
+  dealer            Dealer?        @relation(fields: [dealerId], references: [id], onDelete: SetNull)
+  /// For people who are not dealers: supplier, staff, or a typed number.
+  name              String?
+  text              String
+  status            MessageStatus
+  error             String?
+  /// Invoice, estimate or collection number it is about.
+  ref               String?
+  test              Boolean        @default(false)
+  providerMessageId String?
+  sentById          String?        @db.Uuid
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, date])
+  @@index([tenantId, dealerId])
+  @@index([providerMessageId])
+}
+
+/**
+ * ======================================================================= money and people
+ */
+
+model Expense {
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @db.Uuid
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date           DateTime           @db.Date
+  /// 'Transport' for transport costs (TRANSPORT_HEAD), or any head the company uses.
+  head           String
+  details        String             @default("")
+  amount         Decimal            @db.Decimal(14, 2)
+  method         String
+  /// TransportLink, flattened. Set only on transport costs.
+  transportKind  TransportCostKind?
+  vehicleId      String?            @db.Uuid
+  vehicle        Vehicle?           @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  tripId         String?            @db.Uuid
+  trip           Trip?              @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  transporter    String?
+  factoryOrderId String?            @db.Uuid
+  factoryOrder   FactoryOrder?      @relation(fields: [factoryOrderId], references: [id], onDelete: SetNull)
+  odometer       Int?
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, date])
+  @@index([tenantId, head, date])
+  @@index([vehicleId])
+  @@index([tripId])
+}
+
+model Vehicle {
+  id          String           @id @default(uuid()) @db.Uuid
+  tenantId    String           @db.Uuid
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  regNo       String           @default("")
+  type        VehicleType
+  capacity    String           @default("")
+  ownership   VehicleOwnership
+  /// For a rented vehicle: who it is rented from and the rent per month.
+  owner       String           @default("")
+  monthlyRent Decimal          @default(0) @db.Decimal(14, 2)
+  driverId    String?          @db.Uuid
+  driver      Employee?        @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  driverName  String           @default("")
+  driverPhone String           @default("")
+  /// SIM in the cab or the GPS tracker.
+  phone       String           @default("")
+  serviceKm   Int?
+  serviceDays Int?
+  note        String           @default("")
+  archived    Boolean          @default(false)
+  legacyId    String?
+  papers      VehiclePaper[]
+  trips       Trip[]
+  expenses    Expense[]
+
+  @@index([tenantId, archived])
+}
+
+model VehiclePaper {
+  vehicleId String   @db.Uuid
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  key       PaperKey
+  expiresOn DateTime @db.Date
+
+  @@id([vehicleId, key])
+  @@index([expiresOn])
+}
+
+model Trip {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @db.Uuid
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// TR-… from Counter('trip').
+  no              String
+  date            DateTime      @db.Date
+  purpose         TripPurpose
+  status          TripStatus    @default(planned)
+  /// A fleet vehicle (own or rented by the month); null when hired for this trip.
+  vehicleId       String?       @db.Uuid
+  vehicle         Vehicle?      @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  /// TripHire, flattened.
+  hireTransporter String?
+  hireVehicleNo   String?
+  hireDriver      String?
+  hirePhone       String?
+  hireFare        Decimal?      @db.Decimal(14, 2)
+  from            String        @default("")
+  to              String        @default("")
+  dealerId        String?       @db.Uuid
+  dealer          Dealer?       @relation(fields: [dealerId], references: [id], onDelete: SetNull)
+  invoiceId       String?       @db.Uuid
+  invoice         Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  factoryOrderId  String?       @db.Uuid
+  factoryOrder    FactoryOrder? @relation(fields: [factoryOrderId], references: [id], onDelete: SetNull)
+  shipmentId      String?       @db.Uuid
+  shipment        Shipment?     @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  load            String        @default("")
+  kmStart         Int?
+  kmEnd           Int?
+  doneOn          DateTime?     @db.Date
+  receivedBy      String?
+  deliveryNote    String?
+  note            String        @default("")
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  expenses        Expense[]
+  deliveries      Delivery[]
+
+  @@unique([tenantId, no])
+  @@index([tenantId, status, date])
+  @@index([vehicleId, date])
+}
+
+model Advance {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date       DateTime @db.Date
+  employeeId String   @db.Uuid
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  amount     Decimal  @db.Decimal(14, 2)
+  method     String
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, employeeId, date])
+}
+
+model Employee {
+  id           String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @db.Uuid
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  phone        String        @default("")
+  /// Job title shown on screens (not the access role).
+  jobTitle     String        @default("")
+  payType      PayType
+  salary       Decimal       @default(0) @db.Decimal(14, 2)
+  /// Commission percent for sales staff.
+  rate         Decimal       @default(0) @db.Decimal(6, 3)
+  commissionOn CommissionOn  @default(sales)
+  joined       DateTime      @db.Date
+  salesTarget  Decimal?      @db.Decimal(14, 2)
+  legacyId     String?
+  users        User[]
+  dealers      Dealer[]
+  quotes       SalesQuote[]
+  invoices     Invoice[]
+  collections  Collection[]
+  vehicles     Vehicle[]
+  advances     Advance[]
+  payrollLines PayrollLine[]
+
+  @@index([tenantId, name])
+}
+
+model PayrollRun {
+  id        String        @id @default(uuid()) @db.Uuid
+  tenantId  String        @db.Uuid
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// 'YYYY-MM'.
+  month     String        @db.Char(7)
+  date      DateTime      @db.Date
+  method    String
+  lines     PayrollLine[]
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, month])
+}
+
+model PayrollLine {
+  id         String      @id @default(uuid()) @db.Uuid
+  runId      String      @db.Uuid
+  run        PayrollRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employeeId String      @db.Uuid
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  kind       PayrollKind
+  amount     Decimal     @db.Decimal(14, 2)
+}
+
+/// ---------- fixed assets, investors, transfers ----------
+
+model FixedAsset {
+  id             String              @id @default(uuid()) @db.Uuid
+  tenantId       String              @db.Uuid
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// FA-2026-00001 from Counter('fa').
+  no             String
+  name           String
+  category       String
+  location       String              @default("")
+  vendor         String              @default("")
+  /// Purchase date.
+  date           DateTime            @db.Date
+  cost           Decimal             @db.Decimal(14, 2)
+  salvage        Decimal             @default(0) @db.Decimal(14, 2)
+  method         DepreciationMethod
+  lifeMonths     Int                 @default(0)
+  /// Percent per year, for declining balance.
+  rate           Decimal             @default(0) @db.Decimal(6, 3)
+  /// Payment method when bought with company money (cash out); empty when not.
+  paidFrom       String              @default("")
+  note           String              @default("")
+  status         AssetStatus         @default(active)
+  disposedOn     DateTime?           @db.Date
+  disposalAmount Decimal?            @db.Decimal(14, 2)
+  disposalMethod String?
+  disposalNote   String?
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  depreciation   AssetDepreciation[]
+
+  @@unique([tenantId, no])
+  @@index([tenantId, status])
+}
+
+/// One month's depreciation of one asset. Unique per asset and month.
+model AssetDepreciation {
+  id       String     @id @default(uuid()) @db.Uuid
+  tenantId String     @db.Uuid
+  assetId  String     @db.Uuid
+  asset    FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  /// 'YYYY-MM'.
+  month    String     @db.Char(7)
+  date     DateTime   @db.Date
+  amount   Decimal    @db.Decimal(14, 2)
+
+  @@unique([assetId, month])
+  @@index([tenantId, month])
+}
+
+model Investor {
+  id       String         @id @default(uuid()) @db.Uuid
+  tenantId String         @db.Uuid
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name     String
+  phone    String         @default("")
+  address  String         @default("")
+  note     String         @default("")
+  joined   DateTime       @db.Date
+  status   InvestorStatus @default(active)
+  legacyId String?
+  txns     InvestorTxn[]
+
+  @@index([tenantId, status])
+}
+
+/// Capital = invest + reinvest - withdraw. Profit waiting = share - payout - reinvest.
+model InvestorTxn {
+  id             String              @id @default(uuid()) @db.Uuid
+  tenantId       String              @db.Uuid
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  investorId     String              @db.Uuid
+  investor       Investor            @relation(fields: [investorId], references: [id], onDelete: Restrict)
+  date           DateTime            @db.Date
+  kind           InvestorTxnKind
+  amount         Decimal             @db.Decimal(14, 2)
+  /// Payment method for invest, withdraw and payout; empty for share and reinvest (no cash moves).
+  method         String              @default("")
+  note           String              @default("")
+  distributionId String?             @db.Uuid
+  distribution   ProfitDistribution? @relation(fields: [distributionId], references: [id], onDelete: Cascade)
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, investorId, date])
+}
+
+model ProfitDistribution {
+  id        String        @id @default(uuid()) @db.Uuid
+  tenantId  String        @db.Uuid
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// PD-1 from Counter('pd').
+  no        String
+  date      DateTime      @db.Date
+  amount    Decimal       @db.Decimal(14, 2)
+  period    String
+  note      String        @default("")
+  shares    InvestorTxn[]
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@unique([tenantId, no])
+}
+
+/// Money moved between the company's own accounts (cash, bank, bKash). Never changes the total.
+model AccountTransfer {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  from      String
+  to        String
+  amount    Decimal  @db.Decimal(14, 2)
+  note      String   @default("")
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, date])
+}
+
+/// ---------- subscription (owned by the platform, never part of the books) ----------
+
+model Subscription {
+  tenantId  String           @id @db.Uuid
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  trialEnds DateTime         @db.Timestamptz(3)
+  /// Paid access ends; null while still on the trial.
+  paidUntil DateTime?        @db.Timestamptz(3)
+  plan      SubscriptionPlan @default(trial)
+  updatedAt DateTime         @updatedAt @db.Timestamptz(3)
+}
+
+model SubscriptionPayment {
+  id        String                @id @default(uuid()) @db.Uuid
+  tenantId  String                @db.Uuid
+  tenant    Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Receipt number shown to the customer, e.g. SUB-4F2A-3.
+  no        String
+  /// Our gateway transaction id (online) or the sender's transaction id (manual).
+  tranId    String
+  plan      SubscriptionPlan
+  months    Int
+  amount    Decimal               @db.Decimal(14, 2)
+  method    SubscriptionPayMethod
+  channel   String?
+  sender    String?
+  paidOn    DateTime?             @db.Date
+  note      String?
+  status    SubscriptionPayStatus
+  reason    String?
+  by        String?
+  decidedAt DateTime?             @db.Timestamptz(3)
+  createdAt DateTime              @default(now()) @db.Timestamptz(3)
+
+  @@unique([tenantId, no])
+  @@index([tranId])
+  @@index([status])
+}
+
+/**
+ * ======================================================================= courier
+ */
+
+model Parcel {
+  id            String          @id @default(uuid()) @db.Uuid
+  tenantId      String          @db.Uuid
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date          DateTime        @db.Date
+  invoiceId     String?         @db.Uuid
+  invoice       Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  dealerId      String?         @db.Uuid
+  dealer        Dealer?         @relation(fields: [dealerId], references: [id], onDelete: SetNull)
+  provider      CourierProvider
+  consignmentId String          @default("")
+  trackingCode  String          @default("")
+  trackingUrl   String          @default("")
+  status        String          @default("pending")
+  /// Cash the courier collects from the customer.
+  cod           Decimal         @default(0) @db.Decimal(14, 2)
+  recipientName String
+  phone         String
+  address       String
+  note          String          @default("")
+  weight        Decimal?        @db.Decimal(8, 3)
+  areaName      String?
+  charge        Decimal?        @db.Decimal(14, 2)
+  /// Our reference sent to the courier: invoice number or an order number.
+  reference     String?
+  /// Booked in test mode or sample data: never sent to a real courier, never polled.
+  test          Boolean         @default(false)
+  lastPolledAt  DateTime?       @db.Timestamptz(3)
+  createdAt     DateTime        @default(now()) @db.Timestamptz(3)
+  events        ParcelEvent[]
+  deliveries    Delivery[]
+
+  @@index([tenantId, date])
+  @@index([tenantId, status])
+  @@index([provider, consignmentId])
+}
+
+model ParcelEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  parcelId  String   @db.Uuid
+  parcel    Parcel   @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  status    String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([parcelId])
+}
+
+/**
+ * ======================================================================= infrastructure
+ */
+
+/// Courier or messaging keys for one company, encrypted with AES-256-GCM (see 05 §5.6).
+model IntegrationSecret {
+  id        String          @id @default(uuid()) @db.Uuid
+  tenantId  String          @db.Uuid
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  kind      IntegrationKind
+  /// 'steadfast' | 'pathao' | 'redx' for courier, 'whatsapp' | 'sms' for messaging.
+  provider  String
+  /// 'v1:' + base64(iv) + ':' + base64(tag) + ':' + base64(ciphertext of the JSON key object).
+  box       String
+  /// Last 4 characters of each secret, and non-secret values (baseUrl, storeId), for the settings screen.
+  hints     Json            @default("{}")
+  updatedAt DateTime        @updatedAt @db.Timestamptz(3)
+  updatedBy String?         @db.Uuid
+
+  @@unique([tenantId, kind, provider])
+}
+
+model AuditLog {
+  id        BigInt   @id @default(autoincrement())
+  tenantId  String?  @db.Uuid
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  at        DateTime @default(now()) @db.Timestamptz(3)
+  /// 'user' | 'platform' | 'system'.
+  actorType String
+  actorId   String?
+  action    String
+  target    String   @default("")
+  detail    Json     @default("{}")
+  ip        String   @default("")
+  requestId String   @default("")
+
+  @@index([tenantId, at])
+  @@index([action, at])
+}
+
+/// Phase 1 only: the whole books as one jsonb document, exactly like today's `books:<id>` key.
+model BooksDoc {
+  tenantId  String   @id @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  version   Int
+  db        Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+}
+
+/// Makes POST /api/commands safe to retry: the same key returns the first answer.
+model IdempotencyKey {
+  tenantId  String   @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  key       String
+  command   String
+  status    Int
+  response  Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([tenantId, key])
+  @@index([createdAt])
+}

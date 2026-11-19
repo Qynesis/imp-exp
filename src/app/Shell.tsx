@@ -5,6 +5,9 @@ import { POWERED_BY } from '@/config/brand'
 import { go, href, useRoute } from '@/core/router'
 import { accessGuard, useBooks } from '@/core/store/context'
 import { Button, cls, Icon, Logo, useSheets, useToast } from '@/ui'
+import { Assistant } from './Assistant'
+import { BillingBar } from './BillingBar'
+import { BellButton, DesktopAlerts } from './Notifications'
 import { FEATURES, type FeatureRouteProps } from './features'
 import { Account, MoreMenuSheet, NavList } from './Navigation'
 import { useAccess } from './useAccess'
@@ -81,6 +84,7 @@ export function Shell() {
             <span>{co.tagline}</span>
           </span>
         </a>
+        <div className="side-tools"><BellButton dark /></div>
         <nav aria-label="Sections"><NavList current={current} /></nav>
         <div className="powered">Powered by <b>{POWERED_BY}</b></div>
         <Account />
@@ -91,10 +95,14 @@ export function Shell() {
           <Logo height={36} src={co.logo} light />
           <b>{co.name || 'Your company'}</b>
         </div>
+        <BellButton dark />
       </header>
 
       <AutoReminders />
+      <DesktopAlerts />
+      <Assistant />
       <main className="main">
+        <BillingBar />
         <div className={cls('page', nav.motion, readonly && 'readonly')} key={pageKey}>
           {readonly && <div className="view-only" role="note">View only. Your role cannot make changes on this screen.</div>}
           <Suspense fallback={<div className="page-loading" aria-busy="true" />}>

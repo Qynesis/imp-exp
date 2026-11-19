@@ -1,9 +1,12 @@
 import { applyBusinessTypes, TRANSPORT_HEAD, WAREHOUSE_PLACE } from './catalog'
-import { cashForDay } from './calc/cashbook'
+import { actions } from './actions'
+import { depreciationDue } from './calc/assets'
+import { accountBalances, accountOf, cashEntries, cashForDay } from './calc/cashbook'
+import { profitPool } from './calc/investors'
 import { stockHistory } from './calc/products'
 import { sampleParcels } from './sampleParcels'
 import { addSampleDelivery } from './sampleDelivery'
-import { addDays, addMonths, daysBetween, parse, todayISO } from './format'
+import { addDays, addMonths, daysBetween, fmonth, parse, todayISO } from './format'
 import { defaultRoles } from './permissions'
 import type {
   Collection, Dealer, DealerTerms, Expense, MessageKind, TransportCostKind, TransportLink, Trip, TripStatus, Vehicle, Db, Employee, FactoryBill, FactoryOrder, FactoryOrderType, FactoryPayment, FactoryReceipt, Invoice, InvoiceLine, ISODate,
@@ -262,9 +265,14 @@ export function demoDb(): Db {
   for (const [id, target] of [['e4', 1500000], ['e5', 1200000]] as const) (db.employees.find((e) => e.id === id) as Employee).salesTarget = target
   db.seq = { id: 1000, ts, fo: 1043, inv: 2312, imp: 16, exp: 2, pb: 222, est: 104, qt: 104 }
   ts = addTransportHistory(db, T, ts)
+  addAssetsAndInvestors(db, T)
   applyBusinessTypes(db, ['food'])
-  // choose the opening cash so that today opens at Tk 4,10,000
+  // choose the opening cash so that today opens at Tk 4,10,000: Tk 85,000 in hand, Tk 2,90,000 in the bank, Tk 35,000 in bKash
   db.openingCash = 410000 - cashForDay(db, T).opening
+  addAccountTransfers(db, T)
+  const opened = accountBalances({ ...db, openingAccounts: {} }, addDays(T, -1))
+  const need = (a: string, target: number) => target - (opened.find((r) => r.account === a)?.balance || 0)
+  db.openingAccounts = { Bank: need('Bank', 290000), bKash: need('bKash', 35000) }
   // raise stock where the sample history would otherwise dip below zero, so every product has a sensible opening figure
   for (const p of db.products) {
     const h = stockHistory(db, p.id)
@@ -496,4 +504,76 @@ function addDeliveryAndMessages(db: Db, today: ISODate, tick: () => number) {
     M(9, 'occasional', 'sms', 'd4', `Dear Al-Amin Distribution, new winter stock of mosquito coil is in. Ask your sales officer for the price list. - ${co}`, 'sent'),
     M(9, 'occasional', 'sms', 'd5', `Dear Madina General Store, new winter stock of mosquito coil is in. - ${co}`, 'sent'),
   ]
+}
+
+/**
+ * Machines, a van and office things bought over the past two years, depreciated every month up to
+ * last month (this month is left for the person to run), and three investors with one profit
+ * distribution. Built with the real actions so the numbers follow the same rules as the screens.
+ */
+function addAssetsAndInvestors(db: Db, today: ISODate) {
+  const month = today.slice(0, 7)
+  // each step runs on a fresh top-level copy, like the app does, so cached figures never go stale
+  const step = (fn: (x: Db) => void) => {
+    const x = { ...db }
+    fn(x)
+    Object.assign(db, x)
+  }
+  const ago = (months: number, day = 10) => `${addMonths(month, -months)}-${String(day).padStart(2, '0')}`
+  const asset = (name: string, category: string, months: number, cost: number, salvage: number, lifeYears: number, paidFrom: string, vendor: string, location: string, rate = 0) =>
+    step((x) => actions.saveAsset(x, {
+      name, category, location, vendor, date: ago(months), cost, salvage, method: rate ? 'declining' : 'straight', lifeMonths: rate ? 0 : lifeYears * 12, rate, paidFrom, note: '',
+    }))
+  asset('Pouch sealing machine', 'Machinery', 22, 480000, 30000, 8, 'Bank transfer', 'Nawabpur machinery market', 'Workshop')
+  asset('Coil packing machine', 'Machinery', 14, 320000, 20000, 6, 'Bank transfer', 'Dholaikhal engineering', 'Workshop')
+  asset('Delivery van (Dhaka Metro-Ta 11-2345)', 'Vehicle', 18, 1450000, 250000, 0, 'Bank transfer', 'Tejgaon auto dealer', 'Warehouse', 20)
+  asset('Office computers (3)', 'Computer and IT', 10, 165000, 15000, 3, 'Cash', 'Multiplan Center', 'Head office')
+  asset('Warehouse racks', 'Furniture', 16, 210000, 10000, 10, 'Cash', 'Local workshop', 'Warehouse')
+  asset('Generator 20 kVA', 'Machinery', 6, 380000, 40000, 7, 'Bank transfer', 'Energypac', 'Warehouse')
+  // book every past month, oldest first
+  const first = (db.assets || []).reduce((m, a) => (a.date.slice(0, 7) < m ? a.date.slice(0, 7) : m), month)
+  for (let m = first; m < month; m = addMonths(m, 1)) {
+    step((x) => { if (depreciationDue(x, m).length) actions.runDepreciation(x, { month: m, date: `${m}-28` }) })
+  }
+
+  const investor = (name: string, phone: string, months: number, capital: number, method: string) => {
+    step((x) => actions.saveInvestor(x, { investor: { name, phone, address: 'Dhaka', note: '', joined: ago(months, 1) }, capital, method, date: ago(months, 1) }))
+    return (db.investors || [])[(db.investors || []).length - 1].id
+  }
+  const a = investor('Md. Kamal Hossain', '01711-234567', 24, 2500000, 'Bank transfer')
+  const b = investor('Nasrin Akter', '01819-445566', 24, 1500000, 'Bank transfer')
+  const c = investor('Abdur Rahim', '01552-778899', 12, 1000000, 'Cash')
+  step((x) => actions.investorMoney(x, { investorId: b, kind: 'invest', amount: 500000, method: 'Bank transfer', note: 'Added for winter stock', date: ago(8, 5) }))
+  const pool = profitPool({ ...db }).pool
+  if (pool > 100000) {
+    const amount = Math.floor((pool * 0.4) / 1000) * 1000
+    step((x) => actions.distributeProfit(x, { amount, period: `${fmonth(addMonths(month, -12))} to ${fmonth(addMonths(month, -3))}`, note: 'Partners meeting', date: ago(2, 5) }))
+    const share = (id: string) => (db.investorTxns || []).filter((t) => t.investorId === id && t.kind === 'share').reduce((s, t) => s + t.amount, 0)
+    step((x) => actions.investorMoney(x, { investorId: a, kind: 'payout', amount: share(a), method: 'Bank transfer', note: 'Profit paid', date: ago(2, 8) }))
+    step((x) => actions.investorMoney(x, { investorId: c, kind: 'reinvest', amount: share(c), method: '', note: 'Kept in the business', date: ago(2, 8) }))
+  }
+}
+
+/**
+ * Cash taken out of the bank at the start of each month to cover what the month pays in cash, and
+ * bKash takings moved to the bank, as a company really does, so each account's balance stays sensible.
+ */
+function addAccountTransfers(db: Db, today: ISODate) {
+  const net = new Map<string, Record<string, number>>()
+  for (const e of cashEntries({ ...db })) {
+    if (e.date >= today) continue
+    const m = e.date.slice(0, 7)
+    const row = net.get(m) || {}
+    const a = accountOf(e.method)
+    row[a] = (row[a] || 0) + e.in - e.out
+    net.set(m, row)
+  }
+  db.transfers = []
+  for (const [m, row] of [...net.entries()].sort()) {
+    const day = (n: number) => `${m}-${String(n).padStart(2, '0')}`
+    if ((row.Cash || 0) < 0) db.transfers.push({ id: 'tr-' + m, ts: ++db.seq.ts, date: day(1), from: 'Bank transfer', to: 'Cash', amount: Math.ceil(-(row.Cash || 0) / 1000) * 1000, note: 'Cash for the month' })
+    if ((row.Cash || 0) > 0) db.transfers.push({ id: 'tr-' + m, ts: ++db.seq.ts, date: day(28), from: 'Cash', to: 'Bank transfer', amount: Math.floor((row.Cash || 0) / 1000) * 1000, note: 'Cash deposited in the bank' })
+    if ((row.bKash || 0) > 20000) db.transfers.push({ id: 'trb-' + m, ts: ++db.seq.ts, date: day(28), from: 'bKash', to: 'Bank transfer', amount: Math.floor(((row.bKash || 0) - 10000) / 1000) * 1000, note: 'bKash cash-out to bank' })
+    if ((row.bKash || 0) < 0) db.transfers.push({ id: 'trb-' + m, ts: ++db.seq.ts, date: day(1), from: 'Bank transfer', to: 'bKash', amount: Math.ceil(-(row.bKash || 0) / 1000) * 1000, note: 'Topped up bKash' })
+  }
 }

@@ -1,9 +1,12 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import { BUSINESS_TYPES, CUSTOM_ENTITIES, FIELD_TYPES, isDb, PAGES, roleLevel, roleName, todayISO, type BusinessTypeId, type CustomEntity, type Role, type User } from '@shared/domain'
+import type { FeatureRouteProps } from '@/app/features'
 import { PageHead } from '@/components/PageHead'
 import { BACKEND } from '@/core/api/client'
+import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, cls, DataTable, Empty, Field, Icon, Logo, useConfirm, useForm, useSheets, useToast } from '@/ui'
+import { Button, Card, cls, DataTable, Empty, Field, Icon, Logo, Segmented, useConfirm, useForm, useSheets, useToast } from '@/ui'
+import { BillingTab } from './billing/BillingTab'
 import { downloadJson, shrinkLogo } from './logo'
 import { CustomFieldSheet } from './sheets/CustomFieldSheet'
 import { RoleSheet } from './sheets/RoleSheet'
@@ -17,10 +20,26 @@ const accessSummary = (role: Role) => {
   return [edit.length && `Edit: ${edit.join(', ')}`, view.length && `View: ${view.join(', ')}`].filter(Boolean).join(' · ') || 'No access'
 }
 
-export default function SettingsPage() {
+type Tab = 'general' | 'billing'
+
+export default function SettingsPage({ params: [param = ''] }: FeatureRouteProps) {
+  const [tabPart, query = ''] = param.split('?')
+  const tab: Tab = tabPart === 'billing' ? 'billing' : 'general'
+  const outcome = new URLSearchParams(query).get('payment') || ''
   return (
     <>
-      <PageHead title="Users, roles and settings" sub="Who can use the software, what each role may do, and how the forms fit your kind of trade." />
+      <PageHead title={tab === 'billing' ? 'Subscription' : 'Users, roles and settings'} sub={tab === 'billing' ? 'Your plan, paying for it, and every payment so far.' : 'Who can use the software, what each role may do, and how the forms fit your kind of trade.'} />
+      <Segmented<Tab> label="Settings section" value={tab} onChange={(t) => go(t === 'billing' ? 'settings/billing' : 'settings')} options={[
+        { value: 'general', label: 'Users and company' }, { value: 'billing', label: 'Subscription' },
+      ]} />
+      {tab === 'billing' ? <BillingTab outcome={outcome} /> : <GeneralTab />}
+    </>
+  )
+}
+
+function GeneralTab() {
+  return (
+    <>
       <div className="grid-side">
         <div className="stack">
           <UsersCard />

@@ -23,6 +23,12 @@ const PATHS = {
   calendar: 'M4 6h16v15H4zM4 10h16M8 3v4M16 3v4',
   settings: 'M3 6h10M17 6h4M3 12h4M11 12h10M3 18h12M19 18h2M15 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM9 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+  building: 'M4 21V5l8-2v18M12 8h8v13M3 21h18M7.5 8h1M7.5 12h1M7.5 16h1M15.5 12h1M15.5 16h1',
+  pie: 'M12 3a9 9 0 1 0 9 9h-9zM15 2.5A9 9 0 0 1 21.5 9H15z',
+  card: 'M3 6h18v12H3zM3 10h18M7 15h4',
+  bell: 'M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0',
+  chat: 'M4 5h16v11H9l-5 4zM8 9.5h8M8 12.5h5',
+  sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
   // actions
   plus: 'M12 5v14M5 12h14',
   edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',

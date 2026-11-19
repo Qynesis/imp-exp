@@ -28,6 +28,8 @@ export type PageId =
   | 'dealers'
   | 'cashbook'
   | 'employees'
+  | 'fixed-assets'
+  | 'investors'
   | 'reports'
   | 'settings'
 export type AccessLevel = 'none' | 'view' | 'edit'
@@ -624,6 +626,9 @@ export interface Sequences {
   est?: number
   /** Next dealer estimate (quote) number. */
   qt?: number
+  /** Next fixed asset number (FA-2026-00001) and profit distribution number (PD-1). */
+  fa?: number
+  pd?: number
 }
 
 export interface Db {
@@ -635,6 +640,8 @@ export interface Db {
   businessTypes: BusinessTypeId[]
   fieldDefs: FieldDef[]
   openingCash: number
+  /** Opening money in bank and mobile wallets, out of `openingCash`; the rest was cash in hand. Missing in older books. */
+  openingAccounts?: Record<string, number>
   categories: Category[]
   products: Product[]
   factories: Factory[]
@@ -667,6 +674,93 @@ export interface Db {
   returns?: SalesReturn[]
   quotes?: SalesQuote[]
   messages?: MessageLog[]
+  /** Missing in books saved before fixed assets and investors were added. */
+  assets?: FixedAsset[]
+  investors?: Investor[]
+  investorTxns?: InvestorTxn[]
+  distributions?: ProfitDistribution[]
+  transfers?: AccountTransfer[]
+}
+
+/** Money moved between the company's own accounts: cash deposited in the bank, cash taken out, bank to bKash. */
+export interface AccountTransfer extends Dated {
+  id: string
+  from: string
+  to: string
+  amount: number
+  note: string
+}
+
+/* ---------- fixed assets ---------- */
+/** straight: the same amount every month over the asset's life. declining: a yearly rate on what is left. none: land and the like. */
+export type DepreciationMethod = 'straight' | 'declining' | 'none'
+/** Depreciation booked for one asset in one month. */
+export interface AssetDepreciation {
+  id: string
+  month: MonthKey
+  date: ISODate
+  amount: number
+}
+/** Something the company owns and uses for years: machines, vehicles, furniture, computers. `date` is the purchase date. */
+export interface FixedAsset extends Dated {
+  id: string
+  name: string
+  category: string
+  location: string
+  /** Who it was bought from. */
+  vendor: string
+  cost: number
+  /** What it will still be worth at the end of its life (scrap value). */
+  salvage: number
+  method: DepreciationMethod
+  /** Useful life in months, for straight-line. */
+  lifeMonths: number
+  /** Percent per year, for declining balance. */
+  rate: number
+  /** How it was paid for (Cash, Bank transfer…). Empty when it was not paid from the company's money now (brought in, or a gift). */
+  paidFrom: string
+  note: string
+  status: 'active' | 'disposed'
+  disposedOn?: ISODate
+  /** What it was sold for when disposed; 0 when scrapped. */
+  disposalAmount?: number
+  disposalMethod?: string
+  disposalNote?: string
+  depreciation: AssetDepreciation[]
+}
+
+/* ---------- investors ---------- */
+export interface Investor {
+  id: string
+  name: string
+  phone: string
+  address: string
+  note: string
+  joined: ISODate
+  status: 'active' | 'exited'
+}
+/**
+ * invest: capital put in (cash in). withdraw: capital taken back (cash out). share: their part of a profit
+ * distribution (no cash moves). payout: profit paid to them (cash out). reinvest: profit added to their capital.
+ */
+export type InvestorTxnKind = 'invest' | 'withdraw' | 'share' | 'payout' | 'reinvest'
+export interface InvestorTxn extends Dated {
+  id: string
+  investorId: string
+  kind: InvestorTxnKind
+  amount: number
+  method: string
+  note: string
+  /** For shares: the distribution they came from. */
+  distributionId?: string
+}
+/** Profit shared out among investors by their ownership on the day. */
+export interface ProfitDistribution extends Dated {
+  id: string
+  amount: number
+  /** What the profit is for, e.g. "January to June 2026". */
+  period: string
+  note: string
 }
 
 /* ---------- courier ---------- */

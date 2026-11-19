@@ -47,6 +47,8 @@ export const FEATURES: FeatureDef[] = [
   { id: 'messages', icon: 'send', label: 'Messages', group: 'Selling', load: () => import('@/features/messages') },
   { id: 'cashbook', icon: 'wallet', label: 'Cashbook and dues', group: 'Money', tab: { label: 'Cash' }, load: () => import('@/features/cashbook') },
   { id: 'employees', icon: 'badge', label: 'Employees', group: 'Money', load: () => import('@/features/employees') },
+  { id: 'fixed-assets', icon: 'building', label: 'Fixed assets', group: 'Money', load: () => import('@/features/fixed-assets') },
+  { id: 'investors', icon: 'pie', label: 'Investors', group: 'Money', load: () => import('@/features/investors') },
   { id: 'reports', icon: 'chart', label: 'Reports', group: 'Money', load: () => import('@/features/reports') },
   { id: 'settings', icon: 'settings', label: 'Users, roles and settings', group: 'Money', load: () => import('@/features/settings') },
 ]

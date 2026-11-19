@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ApiOptions, KvStore } from '../shared/api/core'
+import { claudeAssistant } from './assistant'
 import { fileStore } from './stores/file'
 import { missingStore, postgresStore } from './stores/postgres'
 
@@ -33,6 +34,14 @@ export const apiOptions = (): ApiOptions => ({
   messaging: {
     whatsapp: { token: env('WHATSAPP_TOKEN'), phoneNumberId: env('WHATSAPP_PHONE_NUMBER_ID'), template: env('WHATSAPP_TEMPLATE'), language: env('WHATSAPP_TEMPLATE_LANGUAGE') },
     sms: { apiKey: env('SMS_API_KEY'), senderId: env('SMS_SENDER_ID'), gateway: env('SMS_GATEWAY') },
+  },
+  assistant: claudeAssistant(env('ANTHROPIC_API_KEY')),
+  billing: {
+    trialDays: Number(env('TRIAL_DAYS')) || 14,
+    testPayments: env('BILLING_TEST_PAYMENTS') === '1',
+    gateway: { storeId: env('SSLCOMMERZ_STORE_ID'), storePassword: env('SSLCOMMERZ_STORE_PASSWORD'), sandbox: env('SSLCOMMERZ_SANDBOX') !== '0' },
+    publicUrl: env('APP_URL'),
+    manual: { bkash: env('BILLING_BKASH_NUMBER'), nagad: env('BILLING_NAGAD_NUMBER'), bank: env('BILLING_BANK_DETAILS') },
   },
 })
 

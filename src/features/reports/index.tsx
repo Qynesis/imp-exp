@@ -53,6 +53,7 @@ function ProfitAndLoss({ db, month, setMonth }: { db: Db; month: MonthKey; setMo
         {r.expenses.map((e) => (
           <div className="kv" key={e.label}><span>{e.label} <small className="t-muted">· Expense</small></span><span>{tk(e.amount)}</span></div>
         ))}
+        {r.assetGain !== 0 && <div className="kv"><span>{r.assetGain > 0 ? 'Profit on assets sold' : 'Loss on assets sold or scrapped'}</span><span className={r.assetGain < 0 ? 't-warn' : 't-good'}>{tk(Math.abs(r.assetGain))}</span></div>}
         <div className={`kv total ${r.net < 0 ? 't-warn' : ''}`}><span>{r.net < 0 ? 'Net loss' : 'Net profit'}</span><span>{tk(Math.abs(r.net))}</span></div>
       </div>
     </Card>

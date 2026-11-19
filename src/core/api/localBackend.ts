@@ -100,6 +100,8 @@ const api = createApi(store, webCrypto, {
   demoPassword: DEMO_PASSWORD,
   listPlatformInDemo: true,
   local: true,
+  // no real money in the browser-only mode: online payments are simulated
+  billing: { testPayments: true, trialDays: 14 },
 })
 const migrated = migrateLegacy(store)
 

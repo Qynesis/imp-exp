@@ -9,10 +9,14 @@ import { productInUse } from './calc/products'
 import { sampleParcels } from './sampleParcels'
 import { addSampleDelivery, hasSampleDelivery, removeSampleDelivery } from './sampleDelivery'
 import { computeShipment } from './calc/shipments'
+import { depreciationDue } from './calc/assets'
+import { accountOf } from './calc/cashbook'
+import { tk } from './format'
+import { investorRows, profitPool, splitProfit } from './calc/investors'
 import type {
   Advance, BusinessTypeId, Category, Collection, Company, CustomsInfo, CustomsStage, Dealer, Db, Direction, Employee, Expense, Factory,
   FactoryOrderType, FieldDef, ISODate, Invoice, Delivery, FactoryEstimate, MaterialGiven, MessageLog, MessagingSettings, SalesQuote, SalesReturn, MaterialSettlement, Parcel, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
-  CustomValues,
+  CustomValues, FixedAsset, Investor, InvestorTxnKind,
 } from './types'
 
 const tick = (d: Db) => ++d.seq.ts
@@ -474,6 +478,153 @@ export const actions = {
   payPayroll(d: Db, p: { month: MonthKey; date: ISODate; method: string; lines: PayrollLine[] }) {
     d.payroll.push({ id: uid(d, 'pr'), ts: tick(d), ...p })
   },
+
+  /** Money in each account on the day the books start. The total is the opening cash used everywhere else. */
+  setOpeningBalances(d: Db, p: Record<string, number>) {
+    const others = Object.fromEntries(Object.entries(p).filter(([k, v]) => k !== 'Cash' && Number.isFinite(v) && v !== 0))
+    d.openingAccounts = others
+    d.openingCash = Math.round(((p.Cash || 0) + Object.values(others).reduce((a, b) => a + b, 0)) * 100) / 100
+  },
+
+  /** Move money between our own accounts. The total does not change. */
+  addTransfer(d: Db, p: { from: string; to: string; amount: number; note: string; date: ISODate }) {
+    if (!(p.amount > 0)) throw new Error('Enter the amount')
+    if (accountOf(p.from) === accountOf(p.to)) throw new Error('Choose two different accounts')
+    ;(d.transfers ??= []).push({ id: uid(d, 'tr'), ts: tick(d), ...p })
+  },
+  removeTransfer(d: Db, id: string) {
+    mustFind(d.transfers || [], id, 'Transfer')
+    d.transfers = (d.transfers || []).filter((t) => t.id !== id)
+  },
+
+  /* ----- fixed assets ----- */
+  /** Add an asset, or change one. Once depreciation is booked, its cost and life are fixed until that is undone. */
+  saveAsset(d: Db, p: AssetInput & { id?: string }) {
+    if (!p.name.trim()) throw new Error('Enter the asset name')
+    if (!(p.cost > 0)) throw new Error('Enter what the asset cost')
+    if (p.salvage < 0 || p.salvage >= p.cost) throw new Error('Scrap value must be less than the cost')
+    if (p.method === 'straight' && !(p.lifeMonths > 0)) throw new Error('Enter how many months the asset will last')
+    if (p.method === 'declining' && !(p.rate > 0 && p.rate < 100)) throw new Error('Enter the yearly depreciation rate, between 1 and 99 percent')
+    const list = (d.assets ??= [])
+    const cur = byId(list, p.id)
+    if (cur) {
+      if (cur.depreciation.length && (cur.cost !== p.cost || cur.salvage !== p.salvage || cur.method !== p.method || cur.lifeMonths !== p.lifeMonths || cur.rate !== p.rate || cur.date !== p.date)) {
+        throw new Error('Depreciation is already booked on this asset. Undo it first to change cost, date or life')
+      }
+      const { id: _id, ...rest } = p
+      Object.assign(cur, rest)
+      return
+    }
+    const n = (d.seq.fa = (d.seq.fa || 0) + 1)
+    list.push({ ...p, id: `FA-${p.date.slice(0, 4)}-${String(n).padStart(5, '0')}`, ts: tick(d), status: 'active', depreciation: [] })
+  },
+  /** Remove an asset entered by mistake. Its purchase leaves the cashbook too. */
+  removeAsset(d: Db, id: string) {
+    const a = mustFind(d.assets || [], id, 'Asset')
+    if (a.depreciation.length) throw new Error('Depreciation is booked on this asset. Dispose of it instead, or undo the depreciation first')
+    if (a.status === 'disposed') throw new Error('This asset is already disposed. Undo the disposal first')
+    d.assets = (d.assets || []).filter((x) => x.id !== id)
+  },
+  /** Book one month's depreciation for every active asset that still needs it. */
+  runDepreciation(d: Db, p: { month: MonthKey; date: ISODate }) {
+    const due = depreciationDue(d, p.month)
+    if (!due.length) throw new Error('Nothing to depreciate for that month: every active asset is done or bought later')
+    for (const { asset, amount } of due) {
+      mustFind(d.assets || [], asset.id, 'Asset').depreciation.push({ id: uid(d, 'dp'), month: p.month, date: p.date, amount })
+    }
+  },
+  /** Take back a month's depreciation, for one asset or for all of them. */
+  undoDepreciation(d: Db, p: { month: MonthKey; assetId?: string }) {
+    let n = 0
+    for (const a of d.assets || []) {
+      if (p.assetId && a.id !== p.assetId) continue
+      if (a.status === 'disposed') continue
+      const before = a.depreciation.length
+      a.depreciation = a.depreciation.filter((x) => x.month !== p.month)
+      n += before - a.depreciation.length
+    }
+    if (!n) throw new Error('No depreciation booked for that month')
+  },
+  /** Sell or scrap an asset. The sale price comes into the cashbook; profit or loss against its book value goes to P&L. */
+  disposeAsset(d: Db, p: { id: string; date: ISODate; amount: number; method: string; note: string }) {
+    const a = mustFind(d.assets || [], p.id, 'Asset')
+    if (a.status === 'disposed') throw new Error('This asset is already disposed')
+    if (p.amount < 0) throw new Error('The sale price cannot be negative')
+    if (p.date < a.date) throw new Error('It cannot be disposed before it was bought')
+    if (a.depreciation.some((x) => x.month > p.date.slice(0, 7))) throw new Error('Depreciation is booked after that date. Undo it first')
+    Object.assign(a, { status: 'disposed', disposedOn: p.date, disposalAmount: p.amount, disposalMethod: p.method, disposalNote: p.note })
+  },
+  undoDisposal(d: Db, id: string) {
+    const a = mustFind(d.assets || [], id, 'Asset')
+    if (a.status !== 'disposed') throw new Error('This asset is not disposed')
+    a.status = 'active'
+    delete a.disposedOn
+    delete a.disposalAmount
+    delete a.disposalMethod
+    delete a.disposalNote
+  },
+
+  /* ----- investors ----- */
+  /** Add an investor (with the capital they bring in), or change their details. */
+  saveInvestor(d: Db, p: { investor: Omit<Investor, 'id' | 'status'> & { id?: string }; capital?: number; method?: string; date?: ISODate }) {
+    if (!p.investor.name.trim()) throw new Error('Enter the investor’s name')
+    const list = (d.investors ??= [])
+    const cur = byId(list, p.investor.id)
+    if (cur) {
+      const { id: _id, ...rest } = p.investor
+      Object.assign(cur, rest)
+      return
+    }
+    const inv: Investor = { ...p.investor, id: uid(d, 'iv'), status: 'active' }
+    list.push(inv)
+    if (p.capital && p.capital > 0) {
+      ;(d.investorTxns ??= []).push({ id: uid(d, 'it'), ts: tick(d), date: p.date || inv.joined, investorId: inv.id, kind: 'invest', amount: p.capital, method: p.method || 'Cash', note: 'Opening capital' })
+    }
+  },
+  /** Money between the company and an investor: capital in or back, profit paid, or profit kept as capital. */
+  investorMoney(d: Db, p: { investorId: string; kind: Exclude<InvestorTxnKind, 'share'>; amount: number; method: string; note: string; date: ISODate }) {
+    const inv = mustFind(d.investors || [], p.investorId, 'Investor')
+    if (!(p.amount > 0)) throw new Error('Enter the amount')
+    const row = investorRows(d).find((r) => r.investor.id === inv.id)
+    if (p.kind === 'invest' && inv.status !== 'active') throw new Error('This investor has left. Make them active again first')
+    if (p.kind === 'withdraw' && p.amount > (row?.capital || 0) + 0.005) throw new Error(`Only ${tk(row?.capital || 0)} of capital is in the business`)
+    if ((p.kind === 'payout' || p.kind === 'reinvest') && p.amount > (row?.available || 0) + 0.005) throw new Error(`Only ${tk(row?.available || 0)} of profit is waiting for this investor`)
+    ;(d.investorTxns ??= []).push({ id: uid(d, 'it'), ts: tick(d), ...p, method: p.kind === 'reinvest' ? '' : p.method })
+  },
+  removeInvestorTxn(d: Db, id: string) {
+    const t = mustFind(d.investorTxns || [], id, 'Entry')
+    if (t.kind === 'share') throw new Error('Profit shares come from a distribution. Undo the distribution instead')
+    d.investorTxns = (d.investorTxns || []).filter((x) => x.id !== id)
+    // taking back capital or profit later must still be covered
+    const row = investorRows(d).find((r) => r.investor.id === t.investorId)
+    if (row && (row.capital < -0.005 || row.available < -0.005)) throw new Error('Later entries depend on this one. Remove those first')
+  },
+  setInvestorStatus(d: Db, p: { id: string; status: Investor['status'] }) {
+    const inv = mustFind(d.investors || [], p.id, 'Investor')
+    const row = investorRows(d).find((r) => r.investor.id === inv.id)
+    if (p.status === 'exited' && row && (row.capital > 0.005 || row.available > 0.005)) throw new Error('Pay back their capital and profit before they leave')
+    inv.status = p.status
+  },
+  /** Share profit out among active investors by ownership today. */
+  distributeProfit(d: Db, p: { amount: number; period: string; note: string; date: ISODate; allowOverPool?: boolean }) {
+    if (!(p.amount > 0)) throw new Error('Enter the amount to share out')
+    const pool = profitPool(d).pool
+    if (!p.allowOverPool && p.amount > pool + 0.005) throw new Error(`Only ${tk(Math.max(pool, 0))} of profit is not shared out yet`)
+    const parts = splitProfit(d, p.amount)
+    if (!parts.length) throw new Error('No active investor has capital in the business')
+    const n = (d.seq.pd = (d.seq.pd || 0) + 1)
+    const id = 'PD-' + n
+    ;(d.distributions ??= []).push({ id, ts: tick(d), amount: p.amount, period: p.period, note: p.note, date: p.date })
+    for (const part of parts) {
+      ;(d.investorTxns ??= []).push({ id: uid(d, 'it'), ts: tick(d), date: p.date, investorId: part.investorId, kind: 'share', amount: part.amount, method: '', note: p.period, distributionId: id })
+    }
+  },
+  undoDistribution(d: Db, id: string) {
+    mustFind(d.distributions || [], id, 'Distribution')
+    d.distributions = (d.distributions || []).filter((x) => x.id !== id)
+    d.investorTxns = (d.investorTxns || []).filter((t) => t.distributionId !== id)
+    if (investorRows(d).some((r) => r.available < -0.005)) throw new Error('Some of this profit is already paid out. Remove those payments first')
+  },
 } satisfies Record<string, (d: Db, payload: never) => void>
 
 /** How much of each product on a bill is still to go: billed less delivered and closed. */
@@ -513,6 +664,8 @@ function addTransportExpense(d: Db, p: { date: ISODate; amount: number; method: 
   d.expenses.push({ id: uid(d, 'ex'), ts: tick(d), date: p.date, head: TRANSPORT_HEAD, details, amount: p.amount, method: p.method, transport: p.link })
 }
 
+export type AssetInput = Omit<FixedAsset, 'id' | 'ts' | 'status' | 'depreciation' | 'disposedOn' | 'disposalAmount' | 'disposalMethod' | 'disposalNote'>
+
 export type Actions = typeof actions
 export type ActionName = keyof Actions
 export type ActionPayload<K extends ActionName> = Parameters<Actions[K]>[1]
@@ -521,5 +674,6 @@ export type ActionPayload<K extends ActionName> = Parameters<Actions[K]>[1]
 export function applyAction<K extends ActionName>(db: Db, name: K, payload: ActionPayload<K>): Db {
   const draft = structuredClone(db)
   ;(actions[name] as (d: Db, p: ActionPayload<K>) => void)(draft, payload)
-  return draft
+  // a new top-level object: anything an action worked out on the draft is cached against it, before its own change
+  return { ...draft }
 }

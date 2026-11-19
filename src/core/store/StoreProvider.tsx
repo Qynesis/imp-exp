@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { isPlatformLogin, type BooksPollResponse, type BooksResponse, type HttpMethod, type LoginResponse, type StatusResponse } from '@shared/api/contract'
+import type { BillingSummary } from '@shared/billing'
 import { applyAction, type ActionName, type ActionPayload, type Db } from '@shared/domain'
 import { ApiError, request } from '../api/client'
 import { getToken, setToken } from '../session/tokens'
@@ -14,27 +15,29 @@ const SAVE_DELAY_MS = 350
 const RETRY_MS = 4000
 const POLL_MS = 15000
 
-type State = Pick<StoreValue, 'phase' | 'db' | 'session'>
+type State = Pick<StoreValue, 'phase' | 'db' | 'session' | 'billing'>
 const initialPhase = (): Phase => (getToken() ? 'loading' : getToken('platform') ? 'platform' : 'signedOut')
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [st, setSt] = useState<State>(() => ({ phase: initialPhase(), db: null, session: null }))
+  const [st, setSt] = useState<State>(() => ({ phase: initialPhase(), db: null, session: null, billing: null }))
   const [sync, setSync] = useState<SyncState>('saved')
   const [notice, setNotice] = useState('')
-  const ref = useRef({ token: getToken(), version: 0, db: null as Db | null, dirty: false, busy: false, timer: 0 as ReturnType<typeof setTimeout> | 0 })
+  const ref = useRef({ token: getToken(), version: 0, db: null as Db | null, dirty: false, busy: false, timer: 0 as ReturnType<typeof setTimeout> | 0, locked: '' })
   const pushRef = useRef<() => void>(() => undefined)
 
   const enter = useCallback((r: BooksResponse) => {
     Object.assign(ref.current, { token: r.token ?? ref.current.token, version: r.version, db: r.db, dirty: false })
     if (r.token) setToken(r.token)
-    setSt((s) => ({ phase: 'ready', db: r.db, session: r.session || s.session }))
+    setSt((s) => ({ phase: 'ready', db: r.db, session: r.session || s.session, billing: r.billing || s.billing }))
   }, [])
+
+  const setBilling = useCallback((billing: BillingSummary) => setSt((s) => ({ ...s, billing })), [])
 
   const leave = useCallback(() => {
     setToken('')
     clearTimeout(ref.current.timer)
     Object.assign(ref.current, { token: '', version: 0, db: null, dirty: false })
-    setSt({ phase: getToken('platform') ? 'platform' : 'signedOut', db: null, session: null })
+    setSt({ phase: getToken('platform') ? 'platform' : 'signedOut', db: null, session: null, billing: null })
   }, [])
 
   const pull = useCallback(async (force: boolean) => {
@@ -43,12 +46,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try {
       const res = await request<BooksPollResponse>('GET', `books?v=${force ? 0 : r.version}`, undefined, r.token)
       if (!('same' in res)) enter(res)
+      else if (res.billing) setBilling(res.billing)
       setSync('saved')
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) leave()
       else if (e instanceof ApiError && e.status === 0) setSync('offline')
     }
-  }, [enter, leave])
+  }, [enter, leave, setBilling])
 
   const push = useCallback(async () => {
     const r = ref.current
@@ -83,6 +87,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [push])
 
   const act = useCallback(<K extends ActionName>(name: K, payload: ActionPayload<K>): string | null => {
+    if (ref.current.locked) {
+      setNotice(ref.current.locked)
+      return ref.current.locked
+    }
     if (accessGuard.readonly) {
       setNotice('Your role can only view this screen.')
       return 'Your role can only view this screen.'
@@ -123,7 +131,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const res = await request<LoginResponse>('POST', path, body)
       if (!isPlatformLogin(res)) return enter(res)
       setToken(res.token, 'platform')
-      setSt({ phase: 'platform', db: null, session: null })
+      setSt({ phase: 'platform', db: null, session: null, billing: null })
     }
     return {
       signIn: signIn as StoreValue['signIn'],
@@ -137,14 +145,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       platformSignOut: () => {
         void request('POST', 'logout', undefined, getToken('platform')).catch(() => undefined)
         setToken('', 'platform')
-        setSt({ phase: 'signedOut', db: null, session: null })
+        setSt({ phase: 'signedOut', db: null, session: null, billing: null })
       },
       call: <T,>(method: HttpMethod, path: string, body?: unknown) => request<T>(method, path, body, ref.current.token),
       users: async (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => enter(await request<BooksResponse>(method, 'users' + query, body, ref.current.token)),
     }
   }, [enter, leave])
 
+  // an ended subscription makes the books read-only; the platform owner can still make changes
+  useEffect(() => {
+    ref.current.locked = st.billing?.status === 'expired' && !st.session?.viaPlatform ? 'Your subscription has ended, so changes cannot be saved. Choose a plan in Settings → Subscription.' : ''
+  }, [st.billing, st.session])
+
   const clearNotice = useCallback(() => setNotice(''), [])
-  const value = useMemo<StoreValue>(() => ({ ...st, act, sync, notice, clearNotice, ...api }), [st, act, sync, notice, clearNotice, api])
+  const value = useMemo<StoreValue>(() => ({ ...st, act, sync, notice, clearNotice, setBilling, ...api }), [st, act, sync, notice, clearNotice, setBilling, api])
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

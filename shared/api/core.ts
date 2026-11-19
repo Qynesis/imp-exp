@@ -8,14 +8,21 @@
  *   session:<digest>  {email, exp, platform?, as?}     signed-in tokens (stored hashed)
  *   tenant:<id>       {name, createdAt}                one per company
  *   books:<id>        {version, db}                    that company's books
+ *   billing:<id>      BillingRecord                    trial, plan, paid until, payments
+ *   billingtx:<tran>  {tenantId}                       finds the company when the payment gateway calls back
  */
+import {
+  gatewayReady, GatewayError, markPaid, newBilling, planById, startCheckout, summarize, validatePayment,
+  type BillingPayment, type BillingRecord, type GatewayKeys, type PayMethod,
+} from '../billing'
+import { localAnswer } from '../assistant/local'
 import { applyBusinessTypes, isBusinessType } from '../domain/catalog'
 import { MESSAGING_FIELDS, MessagingError, sendMessage, type MessagingKeys } from '../messaging'
 import { bookParcel, COURIER_PROVIDERS, courierAreas, courierBalance, CourierError, FIELDS, parcelStatus, testCourier, trackParcel, type BookRequest, type CourierKeys } from '../courier'
 import { isAdmin, OWNER_ROLE_ID } from '../domain/permissions'
 import { demoDb, emptyDb } from '../domain/seed'
 import { isDb, type CourierProvider, type Db, type MessageChannel } from '../domain/types'
-import type { CompanySummary, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
+import type { BillingView, CompanySummary, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
 
 /* ---------- ports ---------- */
 export interface Account {
@@ -66,6 +73,19 @@ export interface CryptoKit {
   equal(a: string, b: string): boolean
 }
 
+/** One turn of the assistant chat, as text. */
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  text: string
+}
+export interface AssistantRequest {
+  db: Db
+  userId: string
+  messages: ChatTurn[]
+}
+/** Answers with an AI model; supplied by the server when it has a key. */
+export type AssistantRunner = (req: AssistantRequest) => Promise<{ reply: string; used: string[] }>
+
 export interface ApiOptions {
   platformEmail: string
   /** When unset, a password is generated once and handed to `store.generatedPassword`. */
@@ -79,6 +99,19 @@ export interface ApiOptions {
   courier?: Partial<Record<CourierProvider, Omit<CourierKeys, 'provider'>>>
   /** WhatsApp and SMS keys from the server's environment. */
   messaging?: Partial<Record<MessageChannel, MessagingKeys>>
+  /** The AI assistant. Without it, questions are answered by the built-in answerer. */
+  assistant?: AssistantRunner
+  billing?: {
+    /** Days of free trial for a new company (default 14). */
+    trialDays?: number
+    /** Simulate online payments when no gateway is set up: for the demo and the browser-only mode. */
+    testPayments?: boolean
+    gateway?: GatewayKeys
+    /** The app's public address, e.g. https://app.example.com, for the gateway to send people back to. */
+    publicUrl?: string
+    /** Where customers send money for a manual payment. */
+    manual?: { bkash?: string; nagad?: string; bank?: string }
+  }
 }
 
 export interface ApiRequest {
@@ -94,6 +127,12 @@ export interface ApiRequest {
 export interface ApiResponse {
   status: number
   body: unknown
+  /** Send the browser to this address instead (the payment gateway's return). */
+  redirect?: string
+}
+/** A handler's answer that sends the browser elsewhere. */
+class Redirect {
+  constructor(public url: string) {}
 }
 
 export class ApiFailure extends Error {
@@ -250,8 +289,47 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
   }
   const emailTaken = async (email: string) => email === PLATFORM || !!(await store.get('account:' + email))
 
+  /* ----- subscriptions ----- */
+  const B = opts.billing || {}
+  const trialDays = B.trialDays && B.trialDays > 0 ? B.trialDays : 14
+  /** A company's subscription. Companies made before subscriptions start a fresh trial today. */
+  const billingOf = async (tenantId: string): Promise<BillingRecord> => {
+    const rec = await store.get<BillingRecord>('billing:' + tenantId)
+    if (rec) return rec
+    const fresh = tenantId === DEMO_TENANT ? { ...newBilling(Date.now(), trialDays), plan: 'free' as const } : newBilling(Date.now(), trialDays)
+    await store.set('billing:' + tenantId, fresh)
+    return fresh
+  }
+  const billingSummary = async (tenantId: string) => summarize(await billingOf(tenantId), Date.now())
+  /** Changes stop when the subscription has ended. The platform owner can still fix things. */
+  const needActive = async (ctx: Ctx) => {
+    if (ctx.email === PLATFORM) return
+    if ((await billingSummary(ctx.acc.tenantId)).status === 'expired') {
+      throw new ApiFailure(402, 'Your subscription has ended, so changes cannot be saved. Choose a plan in Settings → Subscription to continue.')
+    }
+  }
+  const billingView = async (tenantId: string): Promise<BillingView> => {
+    const rec = await billingOf(tenantId)
+    return {
+      summary: summarize(rec, Date.now()),
+      payments: [...rec.payments].reverse(),
+      online: gatewayReady(B.gateway) || !!B.testPayments,
+      test: !gatewayReady(B.gateway) && !!B.testPayments,
+      manual: B.manual || {},
+      trialDays,
+    }
+  }
+  const newPayment = (rec: BillingRecord, tenantId: string, p: Omit<BillingPayment, 'id' | 'at'>): BillingPayment => {
+    rec.seq++
+    const pay: BillingPayment = { ...p, id: `SUB-${tenantId.slice(0, 4).toUpperCase()}-${rec.seq}`, at: new Date().toISOString() }
+    rec.payments.push(pay)
+    return pay
+  }
+  const appLink = (hash: string) => `${(B.publicUrl || '').replace(/\/+$/, '')}/#/${hash}`
+
   // slow down password guessing: 8 failed sign-ins per client and address per 10 minutes
   const fails = new Map<string, { n: number; until: number }>()
+  const chats = new Map<string, { n: number; until: number }>()
   const tooMany = (key: string) => {
     const f = fails.get(key)
     return !!f && f.until > Date.now() && f.n >= 8
@@ -295,7 +373,8 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       await store.set('books:' + tenantId, { version: 1, db } satisfies TenantBooks)
       await store.set('tenant:' + tenantId, { name: company, createdAt: new Date().toISOString() } satisfies TenantInfo)
       await store.set('account:' + email, { tenantId, userId: 'u1', salt, hash: await kit.hashPassword(str(b.password), salt) } satisfies Account)
-      return { token: await newSession(email), session: { userId: 'u1', email, tenantId }, db, version: 1 }
+      await store.set('billing:' + tenantId, newBilling(Date.now(), trialDays))
+      return { token: await newSession(email), session: { userId: 'u1', email, tenantId }, db, version: 1, billing: await billingSummary(tenantId) }
     },
 
     'POST login': async (req) => {
@@ -322,7 +401,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       }
       const tenant = await store.get<TenantBooks>('books:' + acc.tenantId)
       if (!tenant) throw new ApiFailure(401, 'This company no longer exists.')
-      return { token: await newSession(email), session: { userId: acc.userId, email, tenantId: acc.tenantId }, db: tenant.db, version: tenant.version }
+      return { token: await newSession(email), session: { userId: acc.userId, email, tenantId: acc.tenantId }, db: tenant.db, version: tenant.version, billing: await billingSummary(acc.tenantId) }
     },
 
     'POST logout': async (req) => {
@@ -332,8 +411,9 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
 
     'GET books': async (req) => {
       const ctx = await auth(req)
-      if (Number(req.query.get('v')) === ctx.tenant.version) return { same: true, version: ctx.tenant.version }
-      return { session: sessionInfo(ctx), db: ctx.tenant.db, version: ctx.tenant.version }
+      const billing = await billingSummary(ctx.acc.tenantId)
+      if (Number(req.query.get('v')) === ctx.tenant.version) return { same: true, version: ctx.tenant.version, billing }
+      return { session: sessionInfo(ctx), db: ctx.tenant.db, version: ctx.tenant.version, billing }
     },
 
     'PUT books': async (req) => {
@@ -343,6 +423,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const next = b.db
       if (!isDb(next)) throw bad('Those are not valid books.')
       if (b.baseVersion !== version) throw new ApiFailure(409, 'Someone else changed the books.')
+      await needActive(ctx)
       const uid = ctx.acc.userId
       const me = cur.users.find((u) => u.id === uid)
       const myRole = me && cur.roles.find((r) => r.id === me.roleId)
@@ -397,6 +478,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'POST courier/book': async (req) => {
       const ctx = await auth(req)
       needEditor(ctx)
+      await needActive(ctx)
       const b = obj(req.body)
       const r: BookRequest = {
         invoice: str(b.invoice), name: str(b.name), phone: str(b.phone), address: str(b.address), cod: Number(b.cod) || 0, note: str(b.note),
@@ -469,6 +551,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'POST messaging/send': async (req) => {
       const ctx = await auth(req)
       needEditor(ctx)
+      await needActive(ctx)
       const b = obj(req.body)
       const ch = str(b.channel) as MessageChannel
       if (ch !== 'whatsapp' && ch !== 'sms') throw bad('Which channel?')
@@ -481,9 +564,143 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       }
     },
 
+    /* ----- subscription ----- */
+    'GET billing': async (req) => {
+      const ctx = await auth(req)
+      return billingView(ctx.acc.tenantId)
+    },
+    /** "I paid by bKash / bank transfer": waits for the platform owner to check and approve. */
+    'POST billing/claim': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const b = obj(req.body)
+      const plan = planById(str(b.plan))
+      const method = str(b.method) as PayMethod
+      const tranId = str(b.tranId).trim()
+      if (!plan) throw bad('Choose a plan.')
+      if (!['bkash', 'nagad', 'rocket', 'bank'].includes(method)) throw bad('How did you pay?')
+      if (tranId.length < 4) throw bad('Enter the transaction ID from your payment message or bank slip.')
+      const rec = await billingOf(ctx.acc.tenantId)
+      if (rec.payments.some((p) => p.tranId.toLowerCase() === tranId.toLowerCase() && p.status !== 'rejected')) throw new ApiFailure(409, 'That transaction ID was already sent.')
+      const pay = newPayment(rec, ctx.acc.tenantId, {
+        tranId, plan: plan.id, months: plan.months, amount: plan.price, method, sender: str(b.sender).trim().slice(0, 60),
+        paidOn: str(b.paidOn).slice(0, 10), note: str(b.note).trim().slice(0, 300), status: 'pending', by: ctx.email,
+      })
+      await store.set('billing:' + ctx.acc.tenantId, rec)
+      await store.audit(`billing claim ${pay.id} ${plan.id} ${method} ${tranId} for ${ctx.acc.tenantId}`)
+      return billingView(ctx.acc.tenantId)
+    },
+    /** Start paying online. Returns the gateway's page, or `test` when payments are simulated. */
+    'POST billing/checkout': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      const plan = planById(str(obj(req.body).plan))
+      if (!plan) throw bad('Choose a plan.')
+      const live = gatewayReady(B.gateway)
+      if (!live && !B.testPayments) throw bad('Online payment is not set up yet. Pay by bKash or bank transfer and press “I paid”.')
+      if (live && !B.publicUrl) throw new ApiFailure(503, 'The server needs APP_URL set before it can take payments online.')
+      const rec = await billingOf(ctx.acc.tenantId)
+      const tranId = ('SB' + ctx.acc.tenantId.slice(0, 4) + Date.now().toString(36) + kit.randomHex(2)).toUpperCase()
+      const pay = newPayment(rec, ctx.acc.tenantId, { tranId, plan: plan.id, months: plan.months, amount: plan.price, method: live ? 'online' : 'test', status: 'started', by: ctx.email })
+      await store.set('billing:' + ctx.acc.tenantId, rec)
+      if (!live) return { test: true, tranId, amount: plan.price, id: pay.id }
+      await store.set('billingtx:' + tranId, { tenantId: ctx.acc.tenantId })
+      const me = ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)
+      try {
+        const url = await startCheckout(B.gateway!, {
+          tranId, amount: plan.price, plan: plan.label, returnUrl: `${B.publicUrl!.replace(/\/+$/, '')}/api/billing/return`,
+          company: ctx.tenant.db.company.name, email: ctx.email, phone: ctx.tenant.db.company.phone || '',
+        })
+        await store.audit(`billing checkout ${pay.id} ${plan.id} for ${ctx.acc.tenantId} by ${me?.email || ctx.email}`)
+        return { url }
+      } catch (e) {
+        pay.status = 'failed'
+        pay.reason = (e as Error).message
+        await store.set('billing:' + ctx.acc.tenantId, rec)
+        if (e instanceof GatewayError) throw new ApiFailure(502, e.message)
+        throw e
+      }
+    },
+    /** Finish a simulated payment (test mode only). */
+    'POST billing/test-pay': async (req) => {
+      const ctx = await auth(req)
+      needAdmin(ctx)
+      if (gatewayReady(B.gateway) || !B.testPayments) throw bad('Test payments are off.')
+      const b = obj(req.body)
+      const rec = await billingOf(ctx.acc.tenantId)
+      const pay = rec.payments.find((p) => p.tranId === str(b.tranId) && p.status === 'started')
+      if (!pay) throw bad('That payment is not waiting.')
+      if (b.result === 'paid') markPaid(rec, pay, Date.now(), 'Test')
+      else pay.status = 'cancelled'
+      await store.set('billing:' + ctx.acc.tenantId, rec)
+      return billingView(ctx.acc.tenantId)
+    },
+    /** The payment gateway sends the person (and its server, for IPN) back here. Checked with the gateway before anything is marked paid. */
+    'POST billing/return': async (req) => {
+      const b = obj(req.body)
+      const tranId = str(b.tran_id)
+      const ipn = req.query.get('ipn') === '1'
+      const done = (outcome: string) => (ipn ? { ok: true } : new Redirect(appLink(`settings/billing?payment=${outcome}`)))
+      const link = tranId ? await store.get<{ tenantId: string }>('billingtx:' + tranId) : null
+      if (!link) return done('unknown')
+      const rec = await billingOf(link.tenantId)
+      const pay = rec.payments.find((p) => p.tranId === tranId)
+      if (!pay) return done('unknown')
+      if (pay.status === 'paid') return done('paid')
+      const valId = str(b.val_id)
+      if (valId && gatewayReady(B.gateway)) {
+        const v = await validatePayment(B.gateway, valId).catch(() => null)
+        if (v?.ok && v.tranId === tranId && v.amount + 0.001 >= pay.amount) {
+          markPaid(rec, pay, Date.now(), v.channel)
+          await store.set('billing:' + link.tenantId, rec)
+          await store.audit(`billing paid online ${pay.id} ${pay.plan} ${tranId} for ${link.tenantId}`)
+          return done('paid')
+        }
+      }
+      if (pay.status === 'started') {
+        pay.status = str(b.status).toUpperCase() === 'CANCELLED' ? 'cancelled' : 'failed'
+        pay.reason = str(b.error) || str(b.failedreason) || undefined
+        await store.set('billing:' + link.tenantId, rec)
+      }
+      return done(pay.status)
+    },
+
+    /* ----- assistant ----- */
+    'GET assistant': async (req) => {
+      await auth(req)
+      return { ai: !!opts.assistant }
+    },
+    /** Answer a question from this company's books, limited to what the person's role can see. */
+    'POST assistant/chat': async (req) => {
+      const ctx = await auth(req)
+      const raw = Array.isArray(obj(req.body).messages) ? (obj(req.body).messages as unknown[]) : []
+      const messages: ChatTurn[] = raw
+        .map((m) => ({ role: obj(m).role === 'assistant' ? ('assistant' as const) : ('user' as const), text: str(obj(m).text).slice(0, 4000) }))
+        .filter((m) => m.text.trim())
+        .slice(-20)
+      while (messages.length && messages[0].role !== 'user') messages.shift()
+      const last = messages[messages.length - 1]
+      if (!last || last.role !== 'user') throw bad('Ask a question.')
+      // 20 questions a minute per company is plenty for people and keeps the AI bill in check
+      const key = 'ai|' + ctx.acc.tenantId
+      const f = chats.get(key)
+      if (f && f.until > Date.now() && f.n >= 20) throw new ApiFailure(429, 'Too many questions in a minute. Wait a little and ask again.')
+      if (!f || f.until < Date.now()) chats.set(key, { n: 1, until: Date.now() + 60000 })
+      else f.n++
+      if (opts.assistant) {
+        try {
+          return { ...(await opts.assistant({ db: ctx.tenant.db, userId: ctx.acc.userId, messages })), ai: true }
+        } catch (e) {
+          throw new ApiFailure(502, e instanceof Error ? e.message : 'The AI assistant failed.')
+        }
+      }
+      return { ...localAnswer(ctx.tenant.db, ctx.acc.userId, last.text), ai: false }
+    },
+
     'POST users': async (req) => {
       const ctx = await auth(req)
       needAdmin(ctx)
+      await needActive(ctx)
       const b = obj(req.body)
       const email = cleanEmail(b.email)
       const name = str(b.name).trim()
@@ -505,6 +722,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'PATCH users': async (req) => {
       const ctx = await auth(req)
       needAdmin(ctx)
+      await needActive(ctx)
       const b = obj(req.body)
       const { db } = ctx.tenant
       const user = db.users.find((u) => u.id === b.id)
@@ -533,6 +751,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'DELETE users': async (req) => {
       const ctx = await auth(req)
       needAdmin(ctx)
+      await needActive(ctx)
       const id = req.query.get('id')
       const { db } = ctx.tenant
       const user = db.users.find((u) => u.id === id)
@@ -556,6 +775,8 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
           id, name: db?.company.name || t.name, createdAt: t.createdAt, trades: db?.businessTypes || [],
           counts: { products: db?.products.length || 0, invoices: db?.invoices.length || 0, shipments: db?.imports.length || 0 },
           users: (db?.users || []).map((u) => ({ id: u.id, name: u.name, email: u.email, role: db?.roles.find((r) => r.id === u.roleId)?.name || 'No role' })),
+          billing: await billingSummary(id),
+          claims: (await billingOf(id)).payments.filter((p) => p.status === 'pending'),
         })
       }
       return { companies: companies.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)) }
@@ -571,7 +792,35 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       if (!owner) throw bad('That company has no owner.')
       await store.audit(`platform opened company ${tenantId} (${tenant.db.company.name}) as ${owner.email}`)
       const token = await newSession(PLATFORM, { as: { tenantId, userId: owner.id }, exp: Date.now() + PLATFORM_OPEN_MS })
-      return { token, session: { userId: owner.id, email: owner.email, tenantId, viaPlatform: true }, db: tenant.db, version: tenant.version }
+      return { token, session: { userId: owner.id, email: owner.email, tenantId, viaPlatform: true }, db: tenant.db, version: tenant.version, billing: await billingSummary(tenantId) }
+    },
+
+    /** Approve or reject an "I paid" claim, give extra days, or make a company free. Every use is audited. */
+    'POST platform/billing': async (req) => {
+      await platformAuth(req)
+      const b = obj(req.body)
+      const tenantId = str(b.tenantId)
+      if (!(await store.get('tenant:' + tenantId))) throw bad('No such company.')
+      const rec = await billingOf(tenantId)
+      const now = Date.now()
+      const action = str(b.action)
+      if (action === 'approve' || action === 'reject') {
+        const pay = rec.payments.find((p) => p.id === str(b.paymentId))
+        if (!pay || pay.status !== 'pending') throw bad('That payment is not waiting for a decision.')
+        if (action === 'approve') markPaid(rec, pay, now)
+        else Object.assign(pay, { status: 'rejected', decidedAt: new Date(now).toISOString(), reason: str(b.reason).trim() || 'Payment not found' })
+      } else if (action === 'extend') {
+        const days = Math.round(Number(b.days))
+        if (!(days > 0 && days <= 3660)) throw bad('Give between 1 and 3660 days.')
+        const s = summarize(rec, now)
+        if (s.status === 'trial' || (s.status === 'expired' && !rec.paidUntil)) rec.trialEnds = new Date(Math.max(Date.parse(rec.trialEnds), now) + days * 86400000).toISOString()
+        else rec.paidUntil = new Date(Math.max(Date.parse(rec.paidUntil || rec.trialEnds), now) + days * 86400000).toISOString()
+      } else if (action === 'free') rec.plan = 'free'
+      else if (action === 'unfree') rec.plan = rec.payments.filter((p) => p.status === 'paid').pop()?.plan || 'trial'
+      else throw bad('Unknown action.')
+      await store.set('billing:' + tenantId, rec)
+      await store.audit(`platform billing ${action}${b.paymentId ? ' ' + str(b.paymentId) : ''}${b.days ? ' ' + str(b.days) + ' days' : ''} for ${tenantId}`)
+      return { billing: summarize(rec, now), claims: rec.payments.filter((p) => p.status === 'pending') }
     },
 
     'POST platform/password': async (req) => {
@@ -599,7 +848,9 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
         if (!store.ok) throw new ApiFailure(503, store.problem || 'The data store is not set up.')
         await ready()
       } else await ready().catch(() => undefined)
-      return { status: 200, body: await handler(req) }
+      const out = await handler(req)
+      if (out instanceof Redirect) return { status: 303, body: null, redirect: out.url }
+      return { status: 200, body: out }
     } catch (e) {
       if (e instanceof ApiFailure) return { status: e.status, body: { error: e.message } }
       console.error(e)

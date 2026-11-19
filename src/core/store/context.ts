@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { HttpMethod, LoginRequest, SessionInfo, SignupRequest, StatusResponse } from '@shared/api/contract'
+import type { BillingSummary } from '@shared/billing'
 import type { ActionName, ActionPayload, Db } from '@shared/domain'
 
 export type Phase = 'loading' | 'signedOut' | 'platform' | 'ready'
@@ -9,6 +10,10 @@ export interface StoreValue {
   phase: Phase
   db: Db | null
   session: SessionInfo | null
+  /** The company's subscription, as the server last said. */
+  billing: BillingSummary | null
+  /** Take a fresh subscription status from the server (after paying). */
+  setBilling(b: BillingSummary): void
   sync: SyncState
   /** A message for the person, shown once as a toast. */
   notice: string

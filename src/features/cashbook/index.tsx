@@ -1,25 +1,36 @@
 import { useState } from 'react'
-import { addDays, cashForDay, flong, payables, receivables, tk, todayISO } from '@shared/domain'
+import { accountBalances, addDays, cashForDay, flong, payables, receivables, sum, tk, todayISO } from '@shared/domain'
 import { DueRow } from '@/components/DueRow'
 import { PageHead } from '@/components/PageHead'
 import { go } from '@/core/router'
-import { useBooks } from '@/core/store/context'
+import { accessGuard, useBooks } from '@/core/store/context'
 import { CollectSheet } from '@/features/dealers/sheets/CollectSheet'
 import { DealerStatementSheet } from '@/features/dealers/sheets/DealerStatementSheet'
 import { PaySheet } from '@/features/payments/PaySheet'
 import { PayTransporterSheet } from '@/features/transport/sheets/PayTransporterSheet'
-import { Button, Card, DataTable, Empty, Icon, Stat, useSheets } from '@/ui'
+import { Button, Card, DataTable, Empty, Icon, Stat, useConfirm, useSheets, useToast } from '@/ui'
 import { AddExpenseSheet } from './sheets/AddExpenseSheet'
+import { OpeningBalancesSheet } from './sheets/OpeningBalancesSheet'
+import { TransferSheet } from './sheets/TransferSheet'
 
 export default function CashbookPage() {
-  const { db } = useBooks()
+  const { db, act } = useBooks()
   const sheets = useSheets()
+  const toast = useToast()
+  const confirm = useConfirm()
   const today = todayISO()
   const [date, setDate] = useState(today)
   const cash = cashForDay(db, date)
   const rec = receivables(db)
   const pay = payables(db)
   const isToday = date === today
+  const accounts = accountBalances(db, date)
+  const moves = (db.transfers || []).filter((t) => t.date === date)
+  const undoMove = async (id: string) => {
+    if (await confirm({ title: 'Remove this transfer?', confirmLabel: 'Remove', destructive: true })) {
+      if (!act('removeTransfer', id)) toast('Transfer removed')
+    }
+  }
 
   return (
     <>
@@ -27,6 +38,7 @@ export default function CashbookPage() {
         <>
           <Button icon="plus" variant="secondary" onClick={() => sheets.open(AddExpenseSheet)}>Add expense</Button>
           <Button variant="secondary" onClick={() => sheets.open(PaySheet, { crumb: 'Cashbook and dues' })}>Make payment</Button>
+          <Button icon="arrowRight" variant="secondary" onClick={() => sheets.open(TransferSheet)}>Move money</Button>
           <Button icon="wallet" onClick={() => sheets.open(CollectSheet)}>Collect from dealer</Button>
         </>
       } />
@@ -42,6 +54,28 @@ export default function CashbookPage() {
         <Stat icon="arrowOut" label="Cash out" value={tk(cash.out)} />
         <Stat icon="money" label="Closing balance" value={tk(cash.closing)} />
       </div>
+
+      <Card icon="wallet" title="Balance by account" sub={`Where the money is at the end of ${isToday ? 'today' : 'this day'}: cash in hand, bank and mobile wallets`} action={<span className="btn-row tight-row">{!accessGuard.readonly && <Button size="sm" variant="ghost" onClick={() => sheets.open(OpeningBalancesSheet)}>Opening balances</Button>}<b>{tk(sum(accounts, (a) => a.balance))}</b></span>}>
+        <DataTable rows={accounts} rowKey={(a) => a.account}
+          columns={[
+            { label: 'Account', primary: true, render: (a) => a.account },
+            { label: 'In this day', align: 'right', render: (a) => (a.in ? <span className="t-good">{tk(a.in)}</span> : '') },
+            { label: 'Out this day', align: 'right', render: (a) => (a.out ? <span className="t-warn">{tk(a.out)}</span> : '') },
+            { label: 'Balance', align: 'right', render: (a) => <b className={a.balance < 0 ? 't-warn' : undefined}>{tk(a.balance)}</b> },
+          ]} />
+      </Card>
+
+      {moves.length > 0 && (
+        <Card icon="arrowRight" title="Moved between accounts" sub="Does not change the total">
+          <DataTable rows={moves} rowKey={(t) => t.id}
+            columns={[
+              { label: 'From', primary: true, render: (t) => `${t.from} → ${t.to}` },
+              { label: 'Note', render: (t) => <span className="t-muted">{t.note}</span> },
+              { label: 'Amount', align: 'right', render: (t) => <b>{tk(t.amount)}</b> },
+              { label: '', align: 'right', render: (t) => (accessGuard.readonly ? '' : <button type="button" className="link" onClick={() => void undoMove(t.id)}>Remove</button>) },
+            ]} />
+        </Card>
+      )}
 
       <Card title={isToday ? 'Today’s entries' : 'Entries on this day'}>
         <DataTable

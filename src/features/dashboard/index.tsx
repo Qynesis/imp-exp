@@ -1,11 +1,10 @@
 import {
-  addDays, byId, cashForDay, change, fday, flong, fmt, foCalc, fshort, IMPORT_STAGES, isLowStock, orderBook, paperAlerts, PAPERS, payables, plural, receivables,
+  addDays, byId, change, fday, flong, fmt, foCalc, fshort, IMPORT_STAGES, isLowStock, orderBook, paperAlerts, PAPERS, payables, plural, receivables,
   servicesDue, tk, tkShort, todayISO, totalsBetween, tradeOverview, type ImportStage, type PipelineRow,
 } from '@shared/domain'
 import { useAccess } from '@/app/useAccess'
 import { ColumnChart } from '@/components/charts/ColumnChart'
 import { DueRow } from '@/components/DueRow'
-import { PageHead } from '@/components/PageHead'
 import { go, href } from '@/core/router'
 import { useBooks } from '@/core/store/context'
 import { DealerStatementSheet } from '@/features/dealers/sheets/DealerStatementSheet'
@@ -13,6 +12,7 @@ import { NewFactoryOrderSheet } from '@/features/factory-orders/sheets/NewFactor
 import { NewShipmentSheet } from '@/features/shipments/sheets/NewShipmentSheet'
 import { DeliverSheet } from '@/features/deliveries/sheets/DeliverSheet'
 import { Button, Card, cls, Empty, Icon, IconBadge, Pill, Progress, Stat, useSheets } from '@/ui'
+import { TodayPanel, WelcomeBar } from './TodayPanel'
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 const pct = (x: number) => `${Math.round(x * 100)}%`
@@ -24,7 +24,6 @@ export default function DashboardPage() {
   const today = todayISO()
   const pay = payables(db)
   const rec = receivables(db)
-  const cash = cashForDay(db, today)
   const book = orderBook(db)
   const trade = tradeOverview(db)
   const open = db.factoryOrders.map((o) => ({ o, c: foCalc(db, o) })).filter((x) => x.c.pending > 0)
@@ -36,13 +35,11 @@ export default function DashboardPage() {
 
   return (
     <>
-      <PageHead title="Dashboard" sub={flong(today)} actions={
-        <>
-          {can('imports') && <Button icon="ship" variant="secondary" onClick={() => sheets.open(NewShipmentSheet, {})}>New shipment</Button>}
-          {can('factory-orders') && <Button icon="factory" variant="secondary" onClick={() => sheets.open(NewFactoryOrderSheet, {})}>Factory order</Button>}
-          {can('sell') && <Button icon="plus" onClick={() => go('sell')}>New sale invoice</Button>}
-        </>
-      } />
+      <WelcomeBar sub={flong(today)}>
+        {can('imports') && <Button icon="ship" variant="secondary" onClick={() => sheets.open(NewShipmentSheet, {})}>New shipment</Button>}
+        {can('factory-orders') && <Button icon="factory" variant="secondary" onClick={() => sheets.open(NewFactoryOrderSheet, {})}>Factory order</Button>}
+      </WelcomeBar>
+      <TodayPanel />
 
       <div className="stats">
         <Stat href={salesTo} icon="receipt" label="Sales today" value={tk(book.today.value)}
@@ -142,14 +139,6 @@ export default function DashboardPage() {
           </div>
         </Card>
 
-        <Card icon="wallet" title="Today’s cashbook" action={<a className="link" href={href('cashbook')}>Open cashbook</a>}>
-          <div className="kv-list">
-            <div className="kv"><span>Opening balance</span><span>{tk(cash.opening)}</span></div>
-            <div className="kv"><span>Cash in (sales and collection)</span><span>{tk(cash.in)}</span></div>
-            <div className="kv"><span>Cash out (payments and expenses)</span><span>{tk(cash.out)}</span></div>
-            <div className="kv strong"><span>Closing balance</span><span>{tk(cash.closing)}</span></div>
-          </div>
-        </Card>
 
         <Attention />
       </div>

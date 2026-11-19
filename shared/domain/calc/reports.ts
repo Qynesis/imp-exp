@@ -1,5 +1,6 @@
 import type { Db, MonthKey } from '../types'
 import { memo, sum } from './common'
+import { assetGainIn, depreciationIn } from './assets'
 import { invTotal } from './dealers'
 import { payrollFor } from './payroll'
 import { shipmentCalc } from './shipments'
@@ -21,5 +22,9 @@ export const profitAndLoss = (db: Db, month: MonthKey) =>
       { label: 'Transport', amount: sum(exp.filter((e) => e.head === 'Transport'), (e) => e.amount) },
       { label: 'Office and other', amount: sum(exp.filter((e) => e.head !== 'Transport'), (e) => e.amount) },
     ]
-    return { sales, exportSales, exportCost, exports: exports.length, cogs, gross, expenses, net: gross - sum(expenses, (e) => e.amount), invoices: invs.length }
+    const depreciation = depreciationIn(db, month)
+    if (depreciation > 0) expenses.push({ label: 'Depreciation of fixed assets', amount: depreciation })
+    // profit or loss on assets sold or scrapped this month
+    const assetGain = assetGainIn(db, month)
+    return { sales, exportSales, exportCost, exports: exports.length, cogs, gross, expenses, assetGain, net: gross - sum(expenses, (e) => e.amount) + assetGain, invoices: invs.length }
   })

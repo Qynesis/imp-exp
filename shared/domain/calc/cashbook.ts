@@ -49,6 +49,16 @@ export const cashEntries = (db: Db): CashEntry[] =>
       if (sal > 0) push(p.date, p.ts, `Salaries · ${fmonth(p.month)}`, 'Salary', 0, sal, p.method)
       if (com > 0) push(p.date, p.ts + 0.5, `Sales commission · ${fmonth(p.month)}`, 'Commission', 0, com, p.method)
     }
+    for (const a of db.assets || []) {
+      if (a.paidFrom && a.cost > 0) push(a.date, a.ts, `Fixed asset bought: ${a.name} (${a.id})`, 'Fixed asset', 0, a.cost, a.paidFrom)
+      if (a.status === 'disposed' && a.disposedOn && (a.disposalAmount || 0) > 0) push(a.disposedOn, a.ts + 0.5, `Fixed asset sold: ${a.name} (${a.id})`, 'Asset sale', a.disposalAmount || 0, 0, a.disposalMethod)
+    }
+    for (const t of db.investorTxns || []) {
+      const who = name(db.investors || [], t.investorId, 'Investor')
+      if (t.kind === 'invest') push(t.date, t.ts, `${who} · capital added`, 'Investor capital', t.amount, 0, t.method)
+      if (t.kind === 'withdraw') push(t.date, t.ts, `${who} · capital taken back`, 'Capital returned', 0, t.amount, t.method)
+      if (t.kind === 'payout') push(t.date, t.ts, `${who} · profit paid`, 'Profit to investor', 0, t.amount, t.method)
+    }
     return out.sort(byDateTs)
   })
 
@@ -70,4 +80,54 @@ export const cashForDay = (db: Db, date: ISODate): CashDay =>
     const cin = sum(entries, (e) => e.in)
     const cout = sum(entries, (e) => e.out)
     return { opening, in: cin, out: cout, closing: opening + cin - cout, entries }
+  })
+
+/** The account money sits in, from how it was paid: cash in hand, bank, or a mobile wallet. */
+export const ACCOUNTS = ['Cash', 'Bank', 'bKash', 'Nagad', 'Rocket'] as const
+export type Account = (typeof ACCOUNTS)[number] | 'Other'
+export function accountOf(method: string): Account {
+  const m = (method || 'Cash').toLowerCase()
+  if (m.includes('bkash')) return 'bKash'
+  if (m.includes('nagad')) return 'Nagad'
+  if (m.includes('rocket')) return 'Rocket'
+  if (m.includes('cash')) return 'Cash'
+  if (m.includes('bank') || m.includes('cheque') || m.includes('card') || m.includes('lc') || m.includes('transfer')) return 'Bank'
+  return 'Other'
+}
+
+/** Balance of each account at the end of a day. Opening money not given to an account counts as cash in hand. */
+export const accountBalances = (db: Db, date: ISODate): { account: Account; balance: number; in: number; out: number }[] =>
+  memo(db, 'accounts:' + date, () => {
+    const rows = new Map<Account, { account: Account; balance: number; in: number; out: number }>(ACCOUNTS.map((a) => [a, { account: a, balance: 0, in: 0, out: 0 }]))
+    const opening = db.openingAccounts || {}
+    let other = 0
+    for (const [k, v] of Object.entries(opening)) {
+      const a = accountOf(k)
+      const row = rows.get(a) || { account: a, balance: 0, in: 0, out: 0 }
+      row.balance += v
+      rows.set(a, row)
+      other += v
+    }
+    rows.get('Cash')!.balance += (db.openingCash || 0) - other
+    const add = (method: string, cin: number, cout: number, day: ISODate) => {
+      const a = accountOf(method)
+      const row = rows.get(a) || { account: a, balance: 0, in: 0, out: 0 }
+      row.balance += cin - cout
+      if (day === date) {
+        row.in += cin
+        row.out += cout
+      }
+      rows.set(a, row)
+    }
+    for (const e of cashEntries(db)) {
+      if (e.date > date) break
+      add(e.method, e.in, e.out, e.date)
+    }
+    for (const t of db.transfers || []) {
+      if (t.date > date) continue
+      add(t.from, 0, t.amount, t.date)
+      add(t.to, t.amount, 0, t.date)
+    }
+    // the mobile wallets nobody uses stay hidden
+    return [...rows.values()].filter((r) => r.account === 'Cash' || r.account === 'Bank' || r.balance || r.in || r.out)
   })

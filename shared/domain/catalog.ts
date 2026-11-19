@@ -1,7 +1,7 @@
 /** Fixed lists the forms offer, and the trade presets that add extra fields and customs documents. */
 import type { BusinessTypeId, CustomEntity, Db, DutyKey, FieldDef, FieldType, EstimateStatus, PaperKey, ProductKind, ProductSource, Shipment, TransportCostKind, TripPurpose, TripStatus, VehicleType } from './types'
 
-export const PAYMENT_METHODS = ['Cash', 'Bank transfer', 'bKash', 'Cheque'] as const
+export const PAYMENT_METHODS = ['Cash', 'Bank transfer', 'bKash', 'Nagad', 'Cheque'] as const
 export const UNITS = ['cartons', 'jars', 'pouches', 'pcs', 'units', 'sets', 'kg', 'litres', 'MT', 'boxes', 'bags', 'drums', 'rolls'] as const
 export const PRODUCT_KINDS: Record<ProductKind, string> = { finished: 'Finished goods', raw: 'Raw material', packaging: 'Packaging' }
 export const PRODUCT_SOURCES: Record<ProductSource, string> = {

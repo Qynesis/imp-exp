@@ -90,6 +90,10 @@ The Bangla code is its own chunk, downloaded only by people who choose Bangla.
   browser's storage on that device. This is what Vercel hosts. Data stays on one device; download backups.
 - **With the server.** Shared books for many users and devices. Build with `VITE_BACKEND=server`.
 
+The plan for the production backend (NestJS, PostgreSQL and Prisma) is in
+[docs/backend/](docs/backend/README.md). It covers the full Prisma schema, the API, business rules,
+security, integrations, testing and deployment, and how to migrate existing books.
+
 ## Put it on Vercel (frontend only)
 
 Import the repository in Vercel (framework: Vite) and deploy. Nothing else is needed.

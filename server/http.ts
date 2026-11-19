@@ -32,8 +32,11 @@ function readBody(req: IncomingMessage & { body?: unknown }): Promise<unknown> {
     })
     req.on('end', () => {
       if (!chunks.length) return resolve({})
+      const text = Buffer.concat(chunks).toString('utf8')
+      // the payment gateway posts an HTML form back
+      if (String(req.headers['content-type'] || '').includes('application/x-www-form-urlencoded')) return resolve(Object.fromEntries(new URLSearchParams(text)))
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+        resolve(JSON.parse(text))
       } catch {
         reject(new BodyError(400, 'The request was not valid JSON.'))
       }
@@ -73,6 +76,11 @@ export async function handleApi(api: BooksApi, req: IncomingMessage & { query?: 
     client: String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || ''),
   }
   const out = await api.handle(request)
+  if (out.redirect) {
+    res.writeHead(303, { Location: out.redirect, 'Cache-Control': 'no-store' })
+    res.end()
+    return true
+  }
   send(res, out.status, out.body)
   return true
 }
