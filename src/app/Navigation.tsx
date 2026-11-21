@@ -3,6 +3,7 @@ import { href } from '@/core/router'
 import { useBooks, type SyncState } from '@/core/store/context'
 import { cls, Icon, Sheet, useSheetItem, type SheetComponent } from '@/ui'
 import { LangSwitch } from '@/components/LangSwitch'
+import { Shortcuts } from '@/features/dashboard/Shortcuts'
 import { useAccess } from './useAccess'
 
 /** Menu links, grouped. Hovering a link starts downloading that screen. */
@@ -47,6 +48,7 @@ export const MoreMenuSheet: SheetComponent<{ current: string }> = ({ current }) 
   const { close } = useSheetItem()
   return (
     <Sheet title="Menu">
+      <Shortcuts onPick={close} />
       <nav className="more-nav" aria-label="All sections">
         <NavList current={current} onPick={close} />
       </nav>

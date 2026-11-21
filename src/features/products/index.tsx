@@ -5,6 +5,7 @@ import {
 } from '@shared/domain'
 import { downloadCsv } from '@/components/downloadCsv'
 import { PageHead } from '@/components/PageHead'
+import { LabelsSheet } from './sheets/LabelsSheet'
 import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
 import { Button, Card, DataTable, IconBadge, Pill, Segmented, Stat, useSheets } from '@/ui'
@@ -48,6 +49,7 @@ export default function ProductsPage() {
       <PageHead title="Products and stock" sub="Finished goods we sell: where each comes from, what goes into it, and every stock movement." actions={
         <>
           <Button icon="download" variant="secondary" onClick={download}>Download list</Button>
+          <Button icon="barcode" variant="secondary" onClick={() => sheets.open(LabelsSheet, {})}>Barcode labels</Button>
           <Button icon="plus" variant="secondary" onClick={() => sheets.open(AddCategorySheet)}>Add category</Button>
           <Button icon="plus" onClick={() => sheets.open(ProductSheet, { kind: 'finished' })}>Add product</Button>
         </>

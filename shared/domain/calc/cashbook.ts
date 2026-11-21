@@ -1,5 +1,5 @@
 import { fmonth, fmt } from '../format'
-import type { Db, ISODate } from '../types'
+import type { AttachTarget, Attachment, Db, ISODate } from '../types'
 import { byDateTs, byId, memo, sum } from './common'
 import { invTotal } from './dealers'
 
@@ -11,14 +11,17 @@ export interface CashEntry {
   in: number
   out: number
   method: string
+  /** The payment record behind the line, for attaching receipts and slips. */
+  ref?: { target: AttachTarget; id: string; files: Attachment[] }
 }
 
 /** Every movement of money, derived from the records. The cashbook can never disagree with the other screens. */
 export const cashEntries = (db: Db): CashEntry[] =>
   memo(db, 'cash', () => {
     const out: CashEntry[] = []
-    const push = (date: ISODate, ts: number, details: string, head: string, cin: number, cout: number, method?: string) =>
-      out.push({ date, ts, details, head, in: cin, out: cout, method: method || 'Cash' })
+    const push = (date: ISODate, ts: number, details: string, head: string, cin: number, cout: number, method?: string, ref?: CashEntry['ref']) =>
+      out.push({ date, ts, details, head, in: cin, out: cout, method: method || 'Cash', ref })
+    const ref = (target: AttachTarget, r: { id: string; attachments?: Attachment[] }): CashEntry['ref'] => ({ target, id: r.id, files: r.attachments || [] })
     const name = <T extends { id: string; name: string }>(list: T[], id: string, fallback: string) => byId(list, id)?.name || fallback
 
     for (const i of db.invoices) {
@@ -27,15 +30,15 @@ export const cashEntries = (db: Db): CashEntry[] =>
       const part = i.received < invTotal(i)
       push(i.date, i.ts, `${name(db.dealers, i.dealerId, 'Dealer')} · ${part ? 'part payment' : 'payment'} on ${i.id}`, 'Sales', i.received, 0, i.method)
     }
-    for (const c of db.collections) push(c.date, c.ts, `${name(db.dealers, c.dealerId, 'Dealer')} · due collection`, 'Collection', c.amount, 0, c.method)
-    for (const e of db.expenses) push(e.date, e.ts, e.details || `${e.head} expense`, `${e.head} expense`, 0, e.amount, e.method)
-    for (const a of db.advances) push(a.date, a.ts, `Salary advance · ${name(db.employees, a.employeeId, 'Employee')}`, 'Employee expense', 0, a.amount, a.method)
+    for (const c of db.collections) push(c.date, c.ts, `${name(db.dealers, c.dealerId, 'Dealer')} · due collection`, 'Collection', c.amount, 0, c.method, ref('collection', c))
+    for (const e of db.expenses) push(e.date, e.ts, e.details || `${e.head} expense`, `${e.head} expense`, 0, e.amount, e.method, ref('expense', e))
+    for (const a of db.advances) push(a.date, a.ts, `Salary advance · ${name(db.employees, a.employeeId, 'Employee')}`, 'Employee expense', 0, a.amount, a.method, ref('advance', a))
     for (const p of db.supplierPayments) {
       const bill = byId(db.purchases, p.purchaseId)
-      push(p.date, p.ts, `${name(db.suppliers, p.supplierId, 'Supplier')}${bill ? ` · ${bill.billNo}` : ''}`, 'Supplier payment', 0, p.amount, p.method)
+      push(p.date, p.ts, `${name(db.suppliers, p.supplierId, 'Supplier')}${bill ? ` · ${bill.billNo}` : ''}`, 'Supplier payment', 0, p.amount, p.method, ref('supplierPayment', p))
     }
     for (const o of db.factoryOrders) {
-      for (const p of o.payments) push(p.date, p.ts, `${name(db.factories, o.factoryId, 'Factory')} · ${p.note || o.id}`, 'Factory payment', 0, p.amount, p.method)
+      for (const p of o.payments) push(p.date, p.ts, `${name(db.factories, o.factoryId, 'Factory')} · ${p.note || o.id}`, 'Factory payment', 0, p.amount, p.method, ref('factoryPayment', p))
     }
     for (const s of db.imports) {
       if (s.direction === 'export') {
@@ -53,11 +56,17 @@ export const cashEntries = (db: Db): CashEntry[] =>
       if (a.paidFrom && a.cost > 0) push(a.date, a.ts, `Fixed asset bought: ${a.name} (${a.id})`, 'Fixed asset', 0, a.cost, a.paidFrom)
       if (a.status === 'disposed' && a.disposedOn && (a.disposalAmount || 0) > 0) push(a.disposedOn, a.ts + 0.5, `Fixed asset sold: ${a.name} (${a.id})`, 'Asset sale', a.disposalAmount || 0, 0, a.disposalMethod)
     }
+    for (const e of db.expenseEntries || []) {
+      if (e.kind !== 'payment') continue
+      const a = (db.expenseAccounts || []).find((x) => x.id === e.accountId)
+      push(e.date, e.ts, `${a?.name || 'Regular expense'} · payment${e.note ? ` · ${e.note}` : ''}`, `${a?.head || 'Other'} expense`, 0, e.amount, e.method, ref('expenseEntry', e))
+    }
+    for (const t of db.taxPayments || []) push(t.date, t.ts, `${t.kind.toUpperCase()} paid for ${fmonth(t.period)}${t.ref ? ` · ${t.ref}` : ''}`, 'VAT and tax paid', 0, t.amount, t.method, ref('taxPayment', t))
     for (const t of db.investorTxns || []) {
       const who = name(db.investors || [], t.investorId, 'Investor')
-      if (t.kind === 'invest') push(t.date, t.ts, `${who} · capital added`, 'Investor capital', t.amount, 0, t.method)
-      if (t.kind === 'withdraw') push(t.date, t.ts, `${who} · capital taken back`, 'Capital returned', 0, t.amount, t.method)
-      if (t.kind === 'payout') push(t.date, t.ts, `${who} · profit paid`, 'Profit to investor', 0, t.amount, t.method)
+      if (t.kind === 'invest') push(t.date, t.ts, `${who} · capital added`, 'Investor capital', t.amount, 0, t.method, ref('investorTxn', t))
+      if (t.kind === 'withdraw') push(t.date, t.ts, `${who} · capital taken back`, 'Capital returned', 0, t.amount, t.method, ref('investorTxn', t))
+      if (t.kind === 'payout') push(t.date, t.ts, `${who} · profit paid`, 'Profit to investor', 0, t.amount, t.method, ref('investorTxn', t))
     }
     return out.sort(byDateTs)
   })

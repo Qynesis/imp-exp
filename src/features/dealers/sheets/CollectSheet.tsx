@@ -1,6 +1,8 @@
-import { byId, dealerLedger, num, receivables, tk, todayISO } from '@shared/domain'
+import { useState } from 'react'
+import { byId, dealerLedger, num, receivables, tk, todayISO , type Attachment } from '@shared/domain'
 import { MethodSelect } from '@/components/MethodSelect'
 import { useBooks } from '@/core/store/context'
+import { AttachField } from '@/components/attachments/Attachments'
 import { useMessaging, vars } from '@/features/messages/useMessaging'
 import { Field, FormSheet, useForm, useToast } from '@/ui'
 
@@ -14,6 +16,7 @@ export function CollectSheet({ dealerId }: { dealerId?: string }) {
     return { dealerId: start, invoiceId: '', amount: '', method: 'Cash', collectedBy: byId(db.dealers, start)?.salesId || '', date: todayISO() }
   })
   const led = byId(db.dealers, v.dealerId) ? dealerLedger(db, v.dealerId) : null
+  const [files, setFiles] = useState<Attachment[]>([])
   return (
     <FormSheet title="Collect from dealer" crumb="Cashbook and dues" submit="Save collection"
       note={led ? `${led.dealer.name} owes ${tk(led.due)}. The amount is taken off the oldest invoice first unless you pick one.` : 'Add a dealer first.'}
@@ -22,7 +25,7 @@ export function CollectSheet({ dealerId }: { dealerId?: string }) {
         if (!led) return 'Choose a dealer.'
         if (amount <= 0) return 'Enter the amount collected.'
         if (amount > led.due) return `That is more than the ${tk(led.due)} this dealer owes.`
-        act('collect', { dealerId: v.dealerId, invoiceId: v.invoiceId, amount, method: v.method, collectedBy: v.collectedBy, date: v.date })
+        act('collect', { dealerId: v.dealerId, invoiceId: v.invoiceId, amount, method: v.method, collectedBy: v.collectedBy, date: v.date , attachments: files.length ? files : undefined })
         toast(`${tk(amount)} collected from ${led.dealer.name}`)
         // the receipt message, when set to go by itself; the books do not show this payment yet
         void msg.auto('payment', v.dealerId, vars.payment(db, v.dealerId, amount, v.date, amount), v.invoiceId)
@@ -53,6 +56,7 @@ export function CollectSheet({ dealerId }: { dealerId?: string }) {
         </select>
       </Field>
       <Field label="Date"><input type="date" {...bind('date')} /></Field>
+      <AttachField value={files} onChange={setFiles} />
     </FormSheet>
   )
 }

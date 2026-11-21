@@ -49,6 +49,9 @@ don't copy it.
 | `POST /api/billing/checkout` | admin | `{ plan }` → `{ url }` or `{ test, tranId }` | Starts an SSLCommerz checkout; `test` when payments are simulated |
 | `POST /api/billing/test-pay` | admin | `{ tranId, result: paid\|cancelled }` → `BillingView` | Only in test mode |
 | `POST /api/billing/return` | public | gateway form `{ tran_id, val_id, status }` → 303 to `#/settings/billing?payment=…` | Validates `val_id` with SSLCommerz before marking paid; `?ipn=1` answers JSON |
+| `POST /api/files` | editor, active plan | `{ name, type: image/jpeg\|png\|webp\|gif\|application/pdf, data: base64 }` → `{ id, name, type, size }` | Up to 3 MB; photos are shrunk in the browser first. Linked to a payment with the `attach` command |
+| `GET /api/files?id=` | user | → `{ name, type, data }` | Only the owner company's files (404 for others) |
+| `DELETE /api/files?id=` | editor | → `{ ok }` | |
 | `GET /api/platform/companies` | platform | → `{ companies: CompanySummary[] }` | Includes each company's `billing` summary and pending `claims` |
 | `POST /api/platform/billing` | platform | `{ tenantId, action: approve\|reject\|extend\|free\|unfree, paymentId?, reason?, days? }` | Audited |
 | `POST /api/platform/open` | platform | `{ tenantId }` → `BooksResponse` | 4-hour session as the company owner; audited |
@@ -137,6 +140,10 @@ The page and level are the permission needed (see 05 §5.4). "Admin" means `sett
 | `addAdvance`, `saveEmployee`, `payPayroll`, `setSalesTargets` | employees edit | People | |
 | `addTransfer`, `removeTransfer`, `setOpeningBalances` | cashbook edit | Money | |
 | `saveAsset`, `removeAsset`, `runDepreciation`, `undoDepreciation`, `disposeAsset`, `undoDisposal` | fixed-assets edit | Assets | |
+| `setCountry`, `saveTaxSettings`, `saveTaxRate`, `payTax`, `removeTaxPayment` | accounts edit (country: admin) | Accounts | A rate change without a note is refused |
+| `addChangeNote`, `removeChangeNote`, `updateCost` | accounts edit | Accounts | |
+| `saveAccountHead`, `archiveAccountHead`, `saveExpenseAccount`, `expenseEntry`, `removeExpenseEntry` | expenses edit | Expenses | |
+| `attach`, `detach` | edit on the payment's screen | Files | `{ target: collection\|supplierPayment\|factoryPayment\|expense\|advance\|investorTxn\|transfer\|taxPayment\|expenseEntry, id, file }` |
 | `saveInvestor`, `investorMoney`, `removeInvestorTxn`, `setInvestorStatus`, `distributeProfit`, `undoDistribution` | investors edit | Investors | |
 | `replaceAll` | admin | Books | Restore a backup: runs the importer from 08 inside one transaction |
 

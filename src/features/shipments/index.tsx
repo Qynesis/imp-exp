@@ -73,7 +73,7 @@ function ShipmentDetail({ shipment: s }: { shipment: Shipment }) {
             <Button icon="plus" variant="secondary" size="sm" className="edit-only" onClick={() => sheets.open(AddCostSheet, { importId: s.id })}>Add cost</Button>
           </div>}>
           <div className="kv-list">
-            <div className="kv"><span>{c.exp ? 'Export value' : 'Invoice value'} · USD {fmt(s.usd)} at Tk {fmt(s.rate)}</span><span>{tk(c.invoiceTk)}</span></div>
+            <div className="kv"><span>{c.exp ? 'Export value' : 'Invoice value'} · USD {fmt(s.usd)} at {tk(s.rate)}</span><span>{tk(c.invoiceTk)}</span></div>
             {c.exp && <div className="kv"><span>Cost of goods · {fmt(s.qty)} {s.unit}</span><span>{tk(c.goodsCost)}</span></div>}
             {s.costs.map((x) => (
               <div className="kv" key={x.id}><span>{x.type} <small className="t-muted">· {fshort(x.date)}</small></span><span>{tk(x.amount)}</span></div>

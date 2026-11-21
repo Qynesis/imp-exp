@@ -2,7 +2,7 @@
 
 The complete schema is in **[schema.prisma](schema.prisma)**. Copy it to `prisma/schema.prisma` in
 the API project. It has been checked with `prisma validate`, `prisma format` and `prisma generate`
-(Prisma 6). From an empty database it creates 65 tables and 38 enum types.
+(Prisma 6). From an empty database it creates 73 tables and 43 enum types.
 
 ## 2.1 From the JSON books to tables
 
@@ -36,6 +36,11 @@ the API project. It has been checked with `prisma validate`, `prisma format` and
 | `assets` (+ `depreciation`) | `FixedAsset`, `AssetDepreciation` | `FA-2026-00001` in `no`; one depreciation row per asset per month (`@@unique([assetId, month])`) |
 | `investors`, `investorTxns`, `distributions` | `Investor`, `InvestorTxn`, `ProfitDistribution` | Shares of a distribution point to it and are deleted with it |
 | `transfers`, `openingAccounts` | `AccountTransfer`, `Tenant.openingAccounts` | Money moved between cash, bank and wallets |
+| `company.tax`, `taxRates`, `invoices[].taxes`, `purchases[].tax`, `taxPayments` | `Tenant.taxSettings`, `TaxRate`, `InvoiceTax`, `Purchase.tax`, `TaxPayment` | A bill keeps a copy of each rate it used |
+| `changeNotes` | `ChangeNote` | Written automatically on every rate, cost, regular-amount or currency change |
+| `accountHeads`, `expenseAccounts`, `expenseEntries` | `AccountHead`, `ExpenseAccount`, `ExpenseEntry` | One bill per account and period: `CREATE UNIQUE INDEX ON "ExpenseEntry" ("accountId", period) WHERE kind = 'bill'` |
+| `products[].barcode`, `perCarton` | `Product.barcode`, `Product.perCarton` | `CREATE UNIQUE INDEX ON "Product" ("tenantId", barcode) WHERE barcode IS NOT NULL` |
+| `attachments` on payments; KV `file:<tenant>:<id>` | `attachments` JSON + `StoredFile` | Bytes in object storage (S3/R2), never in Postgres |
 | KV `billing:<id>`, `billingtx:<tran>` | `Subscription`, `SubscriptionPayment` | Owned by the platform: never in the books, never changed by a books save |
 | KV `courier:<t>:<p>`, `messaging:<t>:<ch>` | `IntegrationSecret` | Encrypted |
 | KV `session:*`, `account:*`, `platform` | `Session`, `User`, `PlatformAdmin` | |

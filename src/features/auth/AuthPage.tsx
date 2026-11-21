@@ -5,7 +5,14 @@ import { LangSwitch } from '@/components/LangSwitch'
 import { POWERED_BY } from '@/config/brand'
 import { ApiError } from '@/core/api/client'
 import { useStore } from '@/core/store/context'
-import { Button, cls, Field, Logo, Segmented, useForm } from '@/ui'
+import { Button, cls, Field, Icon, Logo, Segmented, useForm, type IconName } from '@/ui'
+
+/** What the software does, as on the brochure: one icon and a name each. */
+const AUTH_FEATURES: [IconName, string][] = [
+  ['cart', 'Purchase and sales'], ['box', 'Stock and inventory'], ['users', 'Dealers and retailers'], ['wallet', 'Cash flow and accounts'],
+  ['receipt', 'Dues and collections'], ['truck', 'Delivery and sales reports'], ['chart', 'Company, product and dealer reports'], ['print', 'Invoice and challan printing'],
+  ['undo', 'Returns'], ['send', 'SMS and WhatsApp alerts'], ['badge', 'Many users with roles'], ['settings', 'Set up for your trade'],
+]
 
 type Mode = 'login' | 'signup'
 interface ServerState {
@@ -71,6 +78,9 @@ export default function AuthPage() {
         <Logo height={96} light />
         <b>Books for importers and exporters</b>
         <p>Factory orders, LC shipments, customs clearance, stock, dealer sales, dues and payroll. One private set of books for each company.</p>
+        <ul className="auth-features">
+          {AUTH_FEATURES.map(([icon, name]) => <li key={name}><span><Icon name={icon} size={22} /></span>{name}</li>)}
+        </ul>
         <span className="powered-auth">Powered by <b>{POWERED_BY}</b></span>
       </div>
       <form className="auth-card" onSubmit={submit} noValidate>

@@ -1,6 +1,6 @@
 import type { Db, Employee, MonthKey, PayrollLine } from '../types'
 import { memo, sum } from './common'
-import { invTotal } from './dealers'
+import { invNet } from './dealers'
 
 export interface SalaryRow {
   e: Employee
@@ -33,7 +33,7 @@ export const payrollFor = (db: Db, month: MonthKey) =>
     })
     const sales: SalesRow[] = db.employees.filter((e) => e.payType === 'sales').map((e) => {
       const invs = db.invoices.filter((i) => i.status === 'final' && !i.sample && i.soldBy === e.id && inMonth(i))
-      const sold = sum(invs, invTotal)
+      const sold = sum(invs, invNet)
       const collected = sum(invs, (i) => i.received || 0) + sum(db.collections.filter((c) => c.collectedBy === e.id && inMonth(c)), (c) => c.amount)
       const commission = Math.round(((e.commissionOn === 'collection' ? collected : sold) * (e.rate || 0)) / 100)
       const paid = paidOf(e.id, 'commission')

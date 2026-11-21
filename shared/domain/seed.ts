@@ -2,6 +2,7 @@ import { applyBusinessTypes, TRANSPORT_HEAD, WAREHOUSE_PLACE } from './catalog'
 import { actions } from './actions'
 import { depreciationDue } from './calc/assets'
 import { accountBalances, accountOf, cashEntries, cashForDay } from './calc/cashbook'
+import { newBarcode } from './barcode'
 import { profitPool } from './calc/investors'
 import { stockHistory } from './calc/products'
 import { sampleParcels } from './sampleParcels'
@@ -266,6 +267,7 @@ export function demoDb(): Db {
   db.seq = { id: 1000, ts, fo: 1043, inv: 2312, imp: 16, exp: 2, pb: 222, est: 104, qt: 104 }
   ts = addTransportHistory(db, T, ts)
   addAssetsAndInvestors(db, T)
+  addAccountsAndExpenses(db, T)
   applyBusinessTypes(db, ['food'])
   // choose the opening cash so that today opens at Tk 4,10,000: Tk 85,000 in hand, Tk 2,90,000 in the bank, Tk 35,000 in bKash
   db.openingCash = 410000 - cashForDay(db, T).opening
@@ -576,4 +578,61 @@ function addAccountTransfers(db: Db, today: ISODate) {
     if ((row.bKash || 0) > 20000) db.transfers.push({ id: 'trb-' + m, ts: ++db.seq.ts, date: day(28), from: 'bKash', to: 'Bank transfer', amount: Math.floor(((row.bKash || 0) - 10000) / 1000) * 1000, note: 'bKash cash-out to bank' })
     if ((row.bKash || 0) < 0) db.transfers.push({ id: 'trb-' + m, ts: ++db.seq.ts, date: day(1), from: 'Bank transfer', to: 'bKash', amount: Math.ceil(-(row.bKash || 0) / 1000) * 1000, note: 'Topped up bKash' })
   }
+}
+
+/**
+ * Bangladesh tax settings and rates, a few update notes, the company's own expense heads, and regular
+ * expenses that show every case: one with a month due, one paid in parts, one paid ahead, one paid weekly.
+ */
+function addAccountsAndExpenses(db: Db, today: ISODate) {
+  const month = today.slice(0, 7)
+  const step = (fn: (x: Db) => void) => {
+    const x = { ...db }
+    fn(x)
+    Object.assign(db, x)
+  }
+  const ago = (months: number, day = 1) => `${addMonths(month, -months)}-${String(day).padStart(2, '0')}`
+  step((x) => actions.setCountry(x, { country: 'BD', replaceRates: true, note: 'Set up for Bangladesh', by: 'Demo Owner' }))
+  const rate = (name: string) => (db.taxRates || []).find((r) => r.name === name)!
+  step((x) => actions.saveTaxSettings(x, { taxNo: '000123456-0101', salesDefault: [rate('VAT 5% (trading)').id], pricesIncludeTax: true }))
+  // the last two months of bills carry 5% trading VAT inside the price; some supplier bills carry 15% VAT
+  const trading = rate('VAT 5% (trading)')
+  for (const inv of db.invoices) {
+    if (inv.status === 'final' && !inv.sample && inv.date >= ago(2)) inv.taxes = [{ rateId: trading.id, name: trading.name, kind: 'vat', rate: 5, inclusive: true }]
+  }
+  for (const p of db.purchases) if (p.date >= ago(3)) p.tax = Math.round(p.qty * p.rate * 0.15)
+  step((x) => actions.saveTaxRate(x, { rate: { ...rate('VAT 7.5%'), rate: 10 }, note: 'Budget 2026-27: reduced rate raised for listed goods', by: 'Demo Accountant', effective: ago(4) }))
+  step((x) => actions.addChangeNote(x, { area: 'costing', subject: 'Freight from Chattogram port', from: 'Tk 18,000 / truck', to: 'Tk 21,500 / truck', note: 'Diesel price rise; landed cost of imports goes up from this month', by: 'Demo Owner', effective: ago(1, 5) }))
+  step((x) => actions.payTax(x, { kind: 'vat', period: addMonths(month, -1), amount: 18500, method: 'Bank transfer', ref: 'A-CH 26-00412', note: 'Mushak 9.1 return', date: ago(0, 12) > today ? today : ago(0, 12) }))
+
+  // barcodes on every item, and carton sizes on finished goods, ready for labels and scanning
+  for (const p of db.products) {
+    p.barcode = newBarcode(db)
+    if (p.kind === 'finished' && !p.unit.includes('carton')) p.perCarton = p.name.includes('1 L') ? 12 : 6
+  }
+  step((x) => actions.saveAccountHead(x, { name: 'Rent', code: '6500', group: 'expense', note: 'Warehouse and office rent' }))
+  step((x) => actions.saveAccountHead(x, { name: 'Utilities', code: '6510', group: 'expense', note: 'Electricity, water, gas, internet' }))
+  const open = (name: string, head: string, frequency: 'monthly' | 'variable' | 'daily', amount: number, start: string, party: string) => {
+    step((x) => actions.saveExpenseAccount(x, { name, head, party, phone: '', frequency, amount, start, note: '', active: true }))
+    return (db.expenseAccounts || [])[(db.expenseAccounts || []).length - 1].id
+  }
+  const entry = (accountId: string, kind: 'bill' | 'payment', amount: number, date: string, extra: { period?: string; method?: string; note?: string } = {}) =>
+    step((x) => actions.expenseEntry(x, { accountId, kind, amount, date: date > today ? today : date, method: extra.method || (kind === 'payment' ? 'Bank transfer' : ''), note: extra.note || '', period: extra.period }))
+
+  // rent: paid every month on the 5th except this month, so this month shows as due
+  const rent = open('Warehouse rent', 'Rent', 'monthly', 45000, ago(8), 'Haji Abdul Karim (landlord)')
+  for (let m = 8; m >= 1; m--) entry(rent, 'payment', 45000, ago(m, 5), { note: `Rent for ${fmonth(addMonths(month, -m))}` })
+  // electricity: a different bill each month, paid in two parts
+  const power = open('DESCO electricity', 'Utilities', 'variable', 0, ago(3), 'DESCO')
+  ;[[3, 8200], [2, 9100], [1, 7600]].forEach(([m, amt]) => {
+    entry(power, 'bill', amt, ago(m, 28), { period: addMonths(month, -m), note: `Bill for ${fmonth(addMonths(month, -m))}` })
+    entry(power, 'payment', Math.round(amt / 2), ago(m - 1, 8), { method: 'bKash', note: 'Part payment' })
+  })
+  entry(power, 'payment', 3550, ago(1, 2), { method: 'bKash' })
+  // internet: six months paid in advance
+  const net = open('Office internet', 'Utilities', 'monthly', 2000, ago(2), 'Link3')
+  entry(net, 'payment', 12000, ago(2, 1), { method: 'Bank transfer', note: 'Six months in advance' })
+  // night guard: daily wage, paid every week
+  const guard = open('Night guard', 'Employee', 'daily', 500, addDays(today, -27), 'Md. Rafiq')
+  for (let w = 3; w >= 0; w--) entry(guard, 'payment', 3500, addDays(today, -w * 7 - 1), { method: 'Cash', note: 'Weekly wage' })
 }

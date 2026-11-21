@@ -1,3 +1,4 @@
+import { Barcode } from '@/components/barcode/Barcode'
 import { byId, fdate, fmt, invoiceDelivery, type Db, type Delivery } from '@shared/domain'
 
 /** The challan for one delivery: only what went this time, and what is still to come on the bill. */
@@ -13,7 +14,7 @@ export function DeliveryChallan({ db, x }: { db: Db; x: Delivery }) {
           {co.logo && <img className="inv-logo" src={co.logo} alt="" />}
           <div><div className="inv-co">{co.name || 'Your company'}</div><div className="inv-muted">{[co.address, co.phone].filter(Boolean).join(' · ')}</div></div>
         </div>
-        <div className="inv-right"><div className="inv-title">Delivery challan</div><div className="inv-muted">{x.id} · {fdate(x.date)}</div><div className="inv-muted">Against bill {x.invoiceId}</div></div>
+        <div className="inv-right"><div className="inv-title">Delivery challan</div><div className="inv-muted">{x.id} · {fdate(x.date)}</div><div className="inv-muted">Against bill {x.invoiceId}</div><Barcode className="inv-barcode" value={x.id} height={30} /></div>
       </div>
       <div className="inv-top">
         <div><div className="inv-muted">To</div><div className="inv-strong">{dealer?.name}</div><div className="inv-muted">{[dealer?.owner, dealer?.address, dealer?.area, dealer?.phone].filter(Boolean).join(' · ')}</div></div>

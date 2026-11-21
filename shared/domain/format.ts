@@ -1,10 +1,28 @@
 import type { ISODate, MonthKey } from './types'
 
-const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 })
-/** Number with Indian digit grouping: 1,20,000. */
-export const fmt = (n: number | null | undefined): string => nf.format(Math.round((Number(n) || 0) * 100) / 100)
-/** Taka amount: Tk 1,20,000. */
-export const tk = (n: number | null | undefined): string => 'Tk ' + fmt(n)
+import type { Currency } from './types'
+
+/** How money is shown: set once from the company's country (Taka with lakh grouping unless changed). */
+const money = { symbol: 'Tk', nf: new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }), lakh: true }
+export function setMoney(c: Pick<Currency, 'symbol' | 'grouping'> | undefined): void {
+  const lakh = (c?.grouping || 'lakh') === 'lakh'
+  const symbol = c?.symbol || 'Tk'
+  if (symbol === money.symbol && lakh === money.lakh) return
+  money.symbol = symbol
+  money.lakh = lakh
+  money.nf = new Intl.NumberFormat(lakh ? 'en-IN' : 'en-US', { maximumFractionDigits: 2 })
+}
+export const moneySymbol = (): string => money.symbol
+/** Number with the company's digit grouping: 1,20,000 (lakh) or 120,000. */
+export const fmt = (n: number | null | undefined): string => money.nf.format(Math.round((Number(n) || 0) * 100) / 100)
+/** Money amount in the company's currency: Tk 1,20,000, $120,000, ¥120,000. */
+export const tk = (n: number | null | undefined): string => {
+  const v = Number(n) || 0
+  const sign = v < 0 ? '−' : ''
+  const s = money.symbol
+  // one-character symbols sit against the number ($120), word symbols get a space (Tk 1,20,000, AED 5,000)
+  return sign + (s.length === 1 ? s : s + ' ') + fmt(Math.abs(v))
+}
 /** Parse what a person typed ("1,20,000", "", "12.5") into a number; anything unreadable is 0. */
 export const num = (v: unknown): number => {
   const n = parseFloat(String(v ?? '').replace(/,/g, ''))
@@ -66,12 +84,17 @@ export function compact(n: number): string {
   const a = Math.abs(n)
   const sign = n < 0 ? '−' : ''
   const trim = (x: number, d: number) => String(Number(x.toFixed(d)))
-  if (a >= 1e7) return `${sign}${trim(a / 1e7, 2)} Cr`
-  if (a >= 1e5) return `${sign}${trim(a / 1e5, 1)} L`
+  if (money.lakh) {
+    if (a >= 1e7) return `${sign}${trim(a / 1e7, 2)} Cr`
+    if (a >= 1e5) return `${sign}${trim(a / 1e5, 1)} L`
+  } else {
+    if (a >= 1e9) return `${sign}${trim(a / 1e9, 2)}B`
+    if (a >= 1e6) return `${sign}${trim(a / 1e6, 2)}M`
+  }
   if (a >= 1e3) return `${sign}${trim(a / 1e3, 1)}K`
   return sign + fmt(a)
 }
-export const tkShort = (n: number): string => 'Tk ' + compact(n)
+export const tkShort = (n: number): string => (money.symbol.length === 1 ? money.symbol : money.symbol + ' ') + compact(n)
 /** "Nov" for a month key or a 0-based month index. */
 export const monShort = (m: MonthKey | number): string => MON[typeof m === 'number' ? m : parse(m + '-01').getMonth()]
 /** "Mon 2 Nov" */

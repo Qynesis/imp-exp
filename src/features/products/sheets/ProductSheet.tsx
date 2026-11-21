@@ -1,4 +1,4 @@
-import { byId, duplicateOf, num, PRODUCT_KINDS, PRODUCT_SOURCES, UNITS, type CustomValues, type ProductKind, type ProductSource, type RecipeLine } from '@shared/domain'
+import { byId, duplicateOf, newBarcode, num, PRODUCT_KINDS, PRODUCT_SOURCES, UNITS, type CustomValues, type ProductKind, type ProductSource, type RecipeLine } from '@shared/domain'
 import { CustomFields } from '@/components/CustomFields'
 import { useBooks } from '@/core/store/context'
 import { Field, FormSheet, useForm, useToast } from '@/ui'
@@ -8,7 +8,8 @@ const toggle = <T,>(list: T[], x: T): T[] => (list.includes(x) ? list.filter((y)
 
 /** Add a product, or edit one when `productId` is given. `kind` sets what a new one starts as. */
 export function ProductSheet({ productId, kind = 'finished' }: { productId?: string; kind?: ProductKind }) {
-  const { db, act } = useBooks()
+  const { db, act, session } = useBooks()
+  const me = db.users.find((u) => u.id === session.userId)
   const toast = useToast()
   const cur = byId(db.products, productId)
   const tops = db.categories.filter((c) => !c.parentId)
@@ -18,13 +19,13 @@ export function ProductSheet({ productId, kind = 'finished' }: { productId?: str
     ? {
         name: cur.name, code: cur.code, top: curCat?.parentId || curCat?.id || '', sub: curCat?.parentId ? curCat.id : '', kind: cur.kind, unit: cur.unit, pack: cur.pack || '',
         cost: String(cur.cost || ''), price: String(cur.price || ''), stock: String(cur.stock), lowAt: String(cur.lowAt || ''), custom: cur.custom || {},
-        sources: cur.sources || [], supplierIds: cur.supplierIds || [],
+        sources: cur.sources || [], supplierIds: cur.supplierIds || [], barcode: cur.barcode || '', perCarton: cur.perCarton ? String(cur.perCarton) : '', costNote: '',
         recipe: (cur.recipe || []).map((r): RecipeRowInput => ({ productId: r.productId, qty: String(r.qty) })),
       }
     : {
         name: '', code: '', top: curCat?.parentId || curCat?.id || tops[0]?.id || '', sub: '', kind, unit: kind === 'finished' ? 'cartons' : kind === 'raw' ? 'kg' : 'pcs', pack: '',
         cost: '', price: '', stock: '', lowAt: '', custom: {} as CustomValues,
-        sources: [] as ProductSource[], supplierIds: [] as string[], recipe: [] as RecipeRowInput[],
+        sources: [] as ProductSource[], supplierIds: [] as string[], recipe: [] as RecipeRowInput[], barcode: '', perCarton: '', costNote: '',
       })
   const subs = db.categories.filter((c) => c.parentId === v.top)
   const forSale = v.kind === 'finished'
@@ -33,6 +34,9 @@ export function ProductSheet({ productId, kind = 'finished' }: { productId?: str
 
   const submit = () => {
     if (!v.name.trim()) return 'Enter the product name.'
+    const code = v.barcode.trim()
+    if (code && /[^\x20-\x7e]/.test(code)) return 'A barcode can hold letters, digits and simple signs only.'
+    if (code && db.products.some((p) => p.id !== cur?.id && (p.barcode === code || (!p.barcode && p.code === code)))) return 'Another product already uses that barcode.'
     const dup = duplicateOf(db, { id: cur?.id, name: v.name, code: v.code })
     if (dup) return dup
     const recipe: RecipeLine[] = []
@@ -47,6 +51,8 @@ export function ProductSheet({ productId, kind = 'finished' }: { productId?: str
       id: cur?.id, name: v.name.trim(), code: v.code.trim(), categoryId: v.sub || v.top, kind: v.kind, unit: v.unit, pack: v.pack.trim(),
       cost: num(v.cost), price: forSale ? num(v.price) : 0, stock: cur ? cur.stock : num(v.stock), lowAt: num(v.lowAt), custom: v.custom,
       sources: v.sources, supplierIds: v.sources.includes('supplier') ? v.supplierIds.filter((id) => byId(db.suppliers, id)) : [], recipe,
+      barcode: code || undefined, perCarton: num(v.perCarton) > 0 ? num(v.perCarton) : undefined, archived: cur?.archived,
+      costNote: v.costNote.trim(), by: me?.name || '',
     })
     toast(cur ? 'Product updated' : 'Product added')
   }
@@ -57,6 +63,10 @@ export function ProductSheet({ productId, kind = 'finished' }: { productId?: str
       onSubmit={submit}>
       <Field label="Product name"><input {...bind('name')} placeholder="e.g. Mustard oil 1 L" /></Field>
       <Field label="Product code"><input {...bind('code')} placeholder="e.g. MO-1L" /></Field>
+      <Field label="Barcode" hint={<>Scanned at receiving, delivery and returns. Empty: the product code is used. <button type="button" className="link" onClick={() => set('barcode', newBarcode(db))}>Make a new barcode</button></>}>
+        <input {...bind('barcode')} placeholder="Scan the pack’s barcode, or make one" autoComplete="off" />
+      </Field>
+      <Field label={`${v.unit || 'Units'} per carton`} hint="For carton labels: one scan counts the whole carton"><input {...nbind('perCarton')} placeholder="e.g. 24" /></Field>
       <Field label="Category">
         <select className="in" value={v.top} onChange={(e) => { set('top', e.target.value); set('sub', '') }}>
           {!tops.length && <option value="">No categories yet</option>}
@@ -76,6 +86,7 @@ export function ProductSheet({ productId, kind = 'finished' }: { productId?: str
         <select {...bind('unit')}>{UNITS.map((u) => <option key={u}>{u}</option>)}</select>
       </Field>
       <Field label="Cost per unit (Tk)" hint={cur ? 'Updated by purchases, imports and workshop batches.' : undefined}><input {...nbind('cost')} placeholder="0" /></Field>
+      {cur && num(v.cost) !== cur.cost && <Field label="Why the cost changed" hint="Kept in Accounts → Update notes"><input {...bind('costNote')} placeholder="e.g. New supplier price from 1 Dec" /></Field>}
       {forSale && <Field label="Dealer price (Tk)"><input {...nbind('price')} placeholder="0" /></Field>}
       {!cur && <Field label="Opening stock"><input {...nbind('stock')} placeholder="0" /></Field>}
       <Field label="Low stock alert at"><input {...nbind('lowAt')} placeholder="e.g. 10" /></Field>

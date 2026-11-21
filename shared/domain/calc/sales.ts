@@ -5,7 +5,7 @@
 import { addDays, addMonths, daysInMonth, fday, fmonth, monShort, todayISO } from '../format'
 import type { Db, DealerTerms, ISODate, MonthKey } from '../types'
 import { byId, memo, sum } from './common'
-import { invTotal } from './dealers'
+import { invNet } from './dealers'
 
 export type Grain = 'day' | 'month' | 'year'
 
@@ -31,12 +31,13 @@ export const saleFacts = (db: Db): SaleFact[] =>
       .map((i): SaleFact => {
         const sub = sum(i.lines, (l) => l.qty * l.price)
         // spread the discount over the lines in proportion, so product totals add up to the invoice
-        const k = sub > 0 ? invTotal(i) / sub : 1
+        const k = sub > 0 ? invNet(i) / sub : 1
         const lines = i.lines.map((l) => {
           const p = byId(db.products, l.productId)
           return { productId: l.productId, name: l.name || p?.name || 'Product', unit: l.unit || p?.unit || '', qty: l.qty, amount: Math.round(l.qty * l.price * k), cost: l.qty * (l.cost ?? p?.cost ?? 0) }
         })
-        const total = invTotal(i)
+        // sales are counted without VAT: the tax belongs to the government
+        const total = invNet(i)
         const cost = sum(lines, (l) => l.cost)
         return { id: i.id, date: i.date, dealerId: i.dealerId, soldBy: i.soldBy, terms: i.terms, total, cost, profit: total - cost, units: sum(lines, (l) => l.qty), lines }
       })

@@ -1,4 +1,6 @@
-import { activeProducts, byId, fmt, num, tk, todayISO, type SupplierTerms } from '@shared/domain'
+import { useState } from 'react'
+import { activeProducts, byId, fmt, num, tk, todayISO, type Attachment, type SupplierTerms } from '@shared/domain'
+import { AttachField } from '@/components/attachments/Attachments'
 import { MethodSelect } from '@/components/MethodSelect'
 import { useBooks } from '@/core/store/context'
 import { Field, FormSheet, useForm, useToast } from '@/ui'
@@ -14,10 +16,14 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
   const first = preset || pool[0]
   const [v, set, bind, nbind] = useForm({
     supplierId: sup?.id || '', billNo: 'PB-' + db.seq.pb, date: todayISO(), productId: first?.id || '', qty: '',
-    rate: first?.cost ? String(first.cost) : '', terms: (sup?.terms || 'credit') as SupplierTerms, paid: '', method: 'Cash',
+    rate: first?.cost ? String(first.cost) : '', terms: (sup?.terms || 'credit') as SupplierTerms, paid: '', method: 'Cash', tax: '',
   })
+  const [files, setFiles] = useState<Attachment[]>([])
+  const purchaseRates = (db.taxRates || []).filter((r) => r.active && r.appliesTo !== 'sales' && r.rate > 0 && r.kind !== 'withholding')
   const product = byId(db.products, v.productId)
-  const amount = num(v.qty) * num(v.rate)
+  const goods = num(v.qty) * num(v.rate)
+  const tax = num(v.tax)
+  const amount = goods + tax
   return (
     <FormSheet title="New purchase" crumb={preset ? preset.name : "Suppliers"} submit="Save purchase"
       note="Goods go straight into warehouse stock. On credit, the unpaid part is added to what we owe this supplier."
@@ -25,9 +31,10 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
         if (!v.supplierId) return 'Add a supplier first.'
         if (!product) return 'Add the item first, under Products and stock.'
         if (num(v.qty) <= 0 || num(v.rate) <= 0) return 'Enter the quantity and the rate.'
+        if (tax < 0) return 'VAT cannot be negative.'
         const paid = v.terms === 'cash' ? amount : num(v.paid)
         if (paid > amount) return `Paid now cannot be more than the bill of ${tk(amount)}.`
-        act('newPurchase', { supplierId: v.supplierId, billNo: v.billNo.trim() || 'PB-' + db.seq.pb, date: v.date, productId: v.productId, qty: num(v.qty), rate: num(v.rate), terms: v.terms, paid, method: v.method })
+        act('newPurchase', { supplierId: v.supplierId, billNo: v.billNo.trim() || 'PB-' + db.seq.pb, date: v.date, productId: v.productId, qty: num(v.qty), rate: num(v.rate), terms: v.terms, paid, method: v.method, tax: tax || undefined, attachments: files.length ? files : undefined })
         toast(`${fmt(num(v.qty))} ${product.unit} added to stock`)
       }}>
       <Field label="Supplier">
@@ -48,7 +55,10 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
         </select>
       </Field>
       <Field label={`Quantity${product ? ` (${product.unit})` : ''}`}><input {...nbind('qty')} placeholder="e.g. 500" /></Field>
-      <Field label="Rate per unit (Tk)" hint={amount > 0 ? `Bill amount ${tk(amount)}` : undefined}><input {...nbind('rate')} placeholder="0" /></Field>
+      <Field label="Rate per unit (Tk)" hint={goods > 0 ? `Goods ${tk(goods)}${tax ? ` + VAT ${tk(tax)} = ${tk(amount)}` : ''}` : undefined}><input {...nbind('rate')} placeholder="0" /></Field>
+      <Field label="VAT on the bill (Tk)" hint={purchaseRates.length ? <>Can be set off against VAT on sales. {purchaseRates.slice(0, 3).map((r) => <button key={r.id} type="button" className="link" onClick={() => set('tax', String(Math.round(goods * r.rate) / 100))}>{r.name}</button>).reduce<React.ReactNode[]>((a, b, i) => (i ? [...a, ' · ', b] : [b]), [])}</> : 'Leave 0 if the supplier charged none'}>
+        <input {...nbind('tax')} placeholder="0" />
+      </Field>
       <Field label="Terms">
         <select {...bind('terms')}>
           <option value="credit">Credit</option>
@@ -57,6 +67,7 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
       </Field>
       {v.terms === 'credit' && <Field label="Paid now (Tk)"><input {...nbind('paid')} placeholder="0" /></Field>}
       <Field label="Paid by"><MethodSelect {...bind('method')} /></Field>
+      <AttachField value={files} onChange={setFiles} />
     </FormSheet>
   )
 }

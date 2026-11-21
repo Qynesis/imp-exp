@@ -29,6 +29,8 @@ export type PageId =
   | 'cashbook'
   | 'employees'
   | 'fixed-assets'
+  | 'expenses'
+  | 'accounts'
   | 'investors'
   | 'reports'
   | 'settings'
@@ -66,6 +68,8 @@ export interface Company {
   courier?: CourierSettings
   /** WhatsApp and SMS; missing until set up. */
   messaging?: MessagingSettings
+  /** Country, currency and tax registration; missing means Bangladesh with Taka. */
+  tax?: TaxSettings
 }
 
 /* ---------- custom fields ---------- */
@@ -118,6 +122,10 @@ export interface Product {
   recipe?: RecipeLine[]
   /** Hidden from lists and pickers, kept for history. */
   archived?: boolean
+  /** Printed on labels and scanned at receiving, delivery and returns. Missing: the product code is used. */
+  barcode?: string
+  /** Units in one carton, for carton labels: scanning a carton label counts the whole carton. */
+  perCarton?: number
   custom?: CustomValues
 }
 
@@ -209,6 +217,7 @@ export interface FactoryPayment extends Dated {
   amount: number
   method: string
   note: string
+  attachments?: Attachment[]
 }
 export interface MaterialGiven {
   productId: string
@@ -271,6 +280,8 @@ export interface Purchase extends Dated {
   qty: number
   rate: number
   terms: SupplierTerms
+  /** Input VAT or tax charged by the supplier, on top of qty × rate. */
+  tax?: number
 }
 export interface SupplierPayment extends Dated {
   id: string
@@ -279,6 +290,7 @@ export interface SupplierPayment extends Dated {
   amount: number
   method: string
   note: string
+  attachments?: Attachment[]
 }
 
 /* ---------- shipments and customs ---------- */
@@ -388,6 +400,8 @@ export interface Invoice extends Dated {
   quoteId?: string
   /** Sample data for trying the delivery section: never moves stock, never counts in sales or money. */
   sample?: boolean
+  /** VAT, GST or sales tax on this bill. Missing in bills made before taxes were added. */
+  taxes?: InvoiceTax[]
 }
 
 /* ---------- delivery, returns, estimates to dealers ---------- */
@@ -489,6 +503,7 @@ export interface Collection extends Dated {
   amount: number
   method: string
   collectedBy: string
+  attachments?: Attachment[]
 }
 
 /* ---------- money and people ---------- */
@@ -500,6 +515,7 @@ export interface Expense extends Dated {
   method: string
   /** Set on transport costs: which vehicle, trip or hired transporter the money went to. */
   transport?: TransportLink
+  attachments?: Attachment[]
 }
 
 /* ---------- transport ---------- */
@@ -583,6 +599,7 @@ export interface Advance extends Dated {
   employeeId: string
   amount: number
   method: string
+  attachments?: Attachment[]
 }
 
 export type PayType = 'salary' | 'sales'
@@ -680,6 +697,13 @@ export interface Db {
   investorTxns?: InvestorTxn[]
   distributions?: ProfitDistribution[]
   transfers?: AccountTransfer[]
+  /** Missing in books saved before tax, accounts and regular expenses were added. */
+  taxRates?: TaxRate[]
+  taxPayments?: TaxPayment[]
+  changeNotes?: ChangeNote[]
+  accountHeads?: AccountHead[]
+  expenseAccounts?: ExpenseAccount[]
+  expenseEntries?: ExpenseEntry[]
 }
 
 /** Money moved between the company's own accounts: cash deposited in the bank, cash taken out, bank to bKash. */
@@ -689,6 +713,129 @@ export interface AccountTransfer extends Dated {
   to: string
   amount: number
   note: string
+  attachments?: Attachment[]
+}
+
+/* ---------- attachments ---------- */
+/** Records that can carry attached money receipts and documents. */
+export type AttachTarget = 'collection' | 'supplierPayment' | 'factoryPayment' | 'expense' | 'advance' | 'investorTxn' | 'transfer' | 'taxPayment' | 'expenseEntry'
+/** A money receipt, bank slip or other document kept with a payment. The file itself is stored by the API. */
+export interface Attachment {
+  id: string
+  name: string
+  type: string
+  size: number
+}
+
+/* ---------- country, tax and VAT ---------- */
+export type TaxKind = 'vat' | 'gst' | 'sales' | 'sd' | 'withholding' | 'income' | 'other'
+export type MoneyGrouping = 'lakh' | 'western'
+export interface Currency {
+  code: string
+  symbol: string
+  grouping: MoneyGrouping
+}
+export interface TaxSettings {
+  /** Code of a preset in countries.ts, or 'XX' for custom. */
+  country: string
+  currency: Currency
+  /** The company's tax registration (BIN in Bangladesh, VAT no., EIN…), printed on bills. */
+  taxNo: string
+  /** Rates ticked by default on a new sale bill. */
+  salesDefault: string[]
+  /** Prices typed on bills already include the default taxes. */
+  pricesIncludeTax: boolean
+}
+export interface TaxRate {
+  id: string
+  name: string
+  kind: TaxKind
+  /** Percent. */
+  rate: number
+  appliesTo: 'sales' | 'purchases' | 'both'
+  active: boolean
+  note: string
+}
+/** A tax on one bill, copied from the rate when the bill was made so later rate changes leave old bills alone. */
+export interface InvoiceTax {
+  rateId?: string
+  name: string
+  kind: TaxKind
+  rate: number
+  /** The price already contains this tax. */
+  inclusive: boolean
+}
+/** VAT or tax paid to the government (or deposited by challan). */
+export interface TaxPayment extends Dated {
+  id: string
+  kind: TaxKind
+  /** Month the payment is for, 'YYYY-MM'. */
+  period: string
+  amount: number
+  method: string
+  /** Challan or receipt number. */
+  ref: string
+  note: string
+  attachments?: Attachment[]
+}
+export type ChangeArea = 'vat' | 'tax' | 'costing' | 'currency' | 'expense' | 'other'
+/** "Why did this change?": a dated note kept whenever a VAT or tax rate, a cost or the currency changes. */
+export interface ChangeNote extends Dated {
+  id: string
+  area: ChangeArea
+  subject: string
+  from?: string
+  to?: string
+  note: string
+  /** Who made the change. */
+  by: string
+  /** When it takes effect, if not the same day. */
+  effective?: ISODate
+}
+/** An account head the company adds itself, e.g. Rent, Utilities, Bank charges. */
+export interface AccountHead {
+  id: string
+  code: string
+  name: string
+  group: 'expense' | 'income'
+  note: string
+  archived?: boolean
+}
+
+/* ---------- regular expenses ---------- */
+export type ExpenseFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly' | 'variable'
+/**
+ * A cost that comes again and again (rent, electricity, internet, a guard's wage). It runs like an account:
+ * charges build up each period, payments go against it, and the balance shows what is owed or paid ahead.
+ */
+export interface ExpenseAccount {
+  id: string
+  name: string
+  /** The expense head it counts under in reports. */
+  head: string
+  /** Who is paid: landlord, utility company… */
+  party: string
+  phone: string
+  frequency: ExpenseFrequency
+  /** Charge per period. For 'variable', each bill is entered by hand. */
+  amount: number
+  start: ISODate
+  end?: ISODate
+  note: string
+  active: boolean
+}
+/** A bill (a charge for a period), a payment, or a correction on an expense account. */
+export interface ExpenseEntry extends Dated {
+  id: string
+  accountId: string
+  kind: 'bill' | 'payment' | 'adjustment'
+  /** Bills: the period it is for ('YYYY-MM' monthly, 'YYYY' yearly, a date for daily or weekly). A bill replaces the automatic charge for that period. */
+  period?: string
+  /** Bills and payments: positive. Adjustments: + adds to what is owed, − takes off. */
+  amount: number
+  method: string
+  note: string
+  attachments?: Attachment[]
 }
 
 /* ---------- fixed assets ---------- */
@@ -753,6 +900,7 @@ export interface InvestorTxn extends Dated {
   note: string
   /** For shares: the distribution they came from. */
   distributionId?: string
+  attachments?: Attachment[]
 }
 /** Profit shared out among investors by their ownership on the day. */
 export interface ProfitDistribution extends Dated {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { accountBalances, addDays, cashForDay, flong, payables, receivables, sum, tk, todayISO } from '@shared/domain'
+import { ClipButton } from '@/components/attachments/Attachments'
 import { DueRow } from '@/components/DueRow'
 import { PageHead } from '@/components/PageHead'
 import { go } from '@/core/router'
@@ -72,7 +73,12 @@ export default function CashbookPage() {
               { label: 'From', primary: true, render: (t) => `${t.from} → ${t.to}` },
               { label: 'Note', render: (t) => <span className="t-muted">{t.note}</span> },
               { label: 'Amount', align: 'right', render: (t) => <b>{tk(t.amount)}</b> },
-              { label: '', align: 'right', render: (t) => (accessGuard.readonly ? '' : <button type="button" className="link" onClick={() => void undoMove(t.id)}>Remove</button>) },
+              { label: '', align: 'right', render: (t) => (
+                <span className="btn-row tight-row">
+                  <ClipButton target="transfer" id={t.id} files={t.attachments || []} title={`${t.from} → ${t.to}`} />
+                  {!accessGuard.readonly && <button type="button" className="link" onClick={() => void undoMove(t.id)}>Remove</button>}
+                </span>
+              ) },
             ]} />
         </Card>
       )}
@@ -90,6 +96,7 @@ export default function CashbookPage() {
             { label: 'Cash in', align: 'right', render: (r) => (r.in ? <b className="t-good">{tk(r.in)}</b> : '') },
             { label: 'Cash out', align: 'right', render: (r) => (r.out ? <b className="t-warn">{tk(r.out)}</b> : '') },
             { label: 'Balance', align: 'right', render: (r) => tk(r.balance) },
+            { label: '', align: 'right', render: (r) => (r.ref ? <ClipButton target={r.ref.target} id={r.ref.id} files={r.ref.files} title={r.details} /> : '') },
           ]}
         />
       </Card>

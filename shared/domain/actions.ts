@@ -12,11 +12,12 @@ import { computeShipment } from './calc/shipments'
 import { depreciationDue } from './calc/assets'
 import { accountOf } from './calc/cashbook'
 import { tk } from './format'
+import { countryByCode } from './countries'
 import { investorRows, profitPool, splitProfit } from './calc/investors'
 import type {
   Advance, BusinessTypeId, Category, Collection, Company, CustomsInfo, CustomsStage, Dealer, Db, Direction, Employee, Expense, Factory,
   FactoryOrderType, FieldDef, ISODate, Invoice, Delivery, FactoryEstimate, MaterialGiven, MessageLog, MessagingSettings, SalesQuote, SalesReturn, MaterialSettlement, Parcel, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
-  CustomValues, FixedAsset, Investor, InvestorTxnKind,
+  CustomValues, FixedAsset, Investor, InvestorTxnKind, Attachment, ChangeArea, ChangeNote, Currency, ExpenseAccount, ExpenseEntry, TaxKind, TaxPayment, TaxRate, AccountHead, AttachTarget,
 } from './types'
 
 const tick = (d: Db) => ++d.seq.ts
@@ -88,10 +89,14 @@ export const actions = {
     if (d.products.some((p) => p.categoryId === id) || d.categories.some((c) => c.parentId === id)) throw new Error('Category is not empty')
     d.categories = d.categories.filter((c) => c.id !== id)
   },
-  saveProduct(d: Db, p: Omit<Product, 'id'> & { id?: string }) {
+  saveProduct(d: Db, p: Omit<Product, 'id'> & { id?: string; costNote?: string; by?: string }) {
+    const { costNote, by, ...product } = p
     const cur = byId(d.products, p.id)
-    if (cur) Object.assign(cur, p)
-    else d.products.push({ ...p, id: uid(d, 'p') })
+    if (cur && cur.cost !== product.cost) {
+      note(d, { area: 'costing', subject: `${cur.name}: cost per ${cur.unit}`, from: String(cur.cost), to: String(product.cost), note: costNote || 'Changed on the product form', by: by || '' })
+    }
+    if (cur) Object.assign(cur, product)
+    else d.products.push({ ...product, id: uid(d, 'p') })
   },
   archiveProduct(d: Db, p: { id: string; archived: boolean }) {
     mustFind(d.products, p.id, 'Product').archived = p.archived || undefined
@@ -209,24 +214,25 @@ export const actions = {
   factoryBill(d: Db, p: { orderId: string; date: ISODate; billNo: string; amount: number; receiptId: string }) {
     mustFind(d.factoryOrders, p.orderId, 'Factory order').bills.push({ id: uid(d, 'fb'), ts: tick(d), date: p.date, billNo: p.billNo, amount: p.amount, receiptId: p.receiptId })
   },
-  payFactory(d: Db, p: { orderId: string; date: ISODate; amount: number; method: string; note: string }) {
-    mustFind(d.factoryOrders, p.orderId, 'Factory order').payments.push({ id: uid(d, 'fp'), ts: tick(d), date: p.date, amount: p.amount, method: p.method, note: p.note })
+  payFactory(d: Db, p: { orderId: string; date: ISODate; amount: number; method: string; note: string; attachments?: Attachment[] }) {
+    mustFind(d.factoryOrders, p.orderId, 'Factory order').payments.push({ id: uid(d, 'fp'), ts: tick(d), date: p.date, amount: p.amount, method: p.method, note: p.note, attachments: p.attachments })
   },
 
   addSupplier(d: Db, p: Omit<Supplier, 'id'>) {
     d.suppliers.push({ id: uid(d, 's'), ...p })
   },
-  newPurchase(d: Db, p: { supplierId: string; billNo: string; date: ISODate; productId: string; qty: number; rate: number; terms: SupplierTerms; paid: number; method: string }) {
+  newPurchase(d: Db, p: { supplierId: string; billNo: string; date: ISODate; productId: string; qty: number; rate: number; terms: SupplierTerms; paid: number; method: string; tax?: number; attachments?: Attachment[] }) {
     const id = uid(d, 'pur')
     d.seq.pb++
-    d.purchases.push({ id, billNo: p.billNo, ts: tick(d), supplierId: p.supplierId, date: p.date, productId: p.productId, qty: p.qty, rate: p.rate, terms: p.terms })
+    if ((p.tax || 0) < 0) throw new Error('VAT cannot be negative')
+    d.purchases.push({ id, billNo: p.billNo, ts: tick(d), supplierId: p.supplierId, date: p.date, productId: p.productId, qty: p.qty, rate: p.rate, terms: p.terms, tax: p.tax || undefined })
     const prod = mustFind(d.products, p.productId, 'Product')
     prod.stock += p.qty
     prod.cost = p.rate
-    if (p.paid > 0) d.supplierPayments.push({ id: uid(d, 'sp'), ts: tick(d), supplierId: p.supplierId, purchaseId: id, date: p.date, amount: p.paid, method: p.method, note: 'Paid on purchase' })
+    if (p.paid > 0) d.supplierPayments.push({ id: uid(d, 'sp'), ts: tick(d), supplierId: p.supplierId, purchaseId: id, date: p.date, amount: p.paid, method: p.method, note: 'Paid on purchase', attachments: p.attachments })
   },
-  paySupplier(d: Db, p: { supplierId: string; purchaseId: string; date: ISODate; amount: number; method: string; note: string }) {
-    d.supplierPayments.push({ id: uid(d, 'sp'), ts: tick(d), supplierId: p.supplierId, purchaseId: p.purchaseId, date: p.date, amount: p.amount, method: p.method, note: p.note })
+  paySupplier(d: Db, p: { supplierId: string; purchaseId: string; date: ISODate; amount: number; method: string; note: string; attachments?: Attachment[] }) {
+    d.supplierPayments.push({ id: uid(d, 'sp'), ts: tick(d), supplierId: p.supplierId, purchaseId: p.purchaseId, date: p.date, amount: p.amount, method: p.method, note: p.note, attachments: p.attachments })
   },
 
   newImport(d: Db, p: NewShipmentInput) {
@@ -487,7 +493,7 @@ export const actions = {
   },
 
   /** Move money between our own accounts. The total does not change. */
-  addTransfer(d: Db, p: { from: string; to: string; amount: number; note: string; date: ISODate }) {
+  addTransfer(d: Db, p: { from: string; to: string; amount: number; note: string; date: ISODate; attachments?: Attachment[] }) {
     if (!(p.amount > 0)) throw new Error('Enter the amount')
     if (accountOf(p.from) === accountOf(p.to)) throw new Error('Choose two different accounts')
     ;(d.transfers ??= []).push({ id: uid(d, 'tr'), ts: tick(d), ...p })
@@ -495,6 +501,138 @@ export const actions = {
   removeTransfer(d: Db, id: string) {
     mustFind(d.transfers || [], id, 'Transfer')
     d.transfers = (d.transfers || []).filter((t) => t.id !== id)
+  },
+
+  /* ----- country, tax and VAT ----- */
+  /** Pick the country: sets the currency and, if asked, replaces the tax rates with that country's usual ones. */
+  setCountry(d: Db, p: { country: string; currency?: Currency; replaceRates: boolean; note: string; by: string }) {
+    const c = countryByCode(p.country)
+    const before = d.company.tax
+    const currency = p.currency || c.currency
+    d.company.tax = { country: c.code, currency, taxNo: before?.taxNo || '', salesDefault: before?.salesDefault || [], pricesIncludeTax: before?.pricesIncludeTax || false }
+    if (p.replaceRates) {
+      for (const r of d.taxRates || []) r.active = false
+      const added = c.rates.map((r) => ({ ...r, id: uid(d, 'tx') }))
+      d.taxRates = [...(d.taxRates || []), ...added]
+      // the first sales VAT/GST/sales tax with a rate is ticked on new bills
+      const first = added.find((r) => r.appliesTo !== 'purchases' && r.rate > 0)
+      d.company.tax.salesDefault = first ? [first.id] : []
+    }
+    if (before?.country !== c.code || before?.currency.symbol !== currency.symbol) {
+      note(d, { area: 'currency', subject: 'Country and currency', from: before ? `${countryByCode(before.country).name}, ${before.currency.code}` : 'Bangladesh, BDT', to: `${c.name}, ${currency.code}`, note: p.note || 'Changed in Accounts → Tax and VAT', by: p.by })
+    }
+    if (p.replaceRates) note(d, { area: 'vat', subject: `${c.taxName} rates set for ${c.name}`, note: p.note || `${c.rates.length} standard rates loaded`, by: p.by })
+  },
+  saveTaxSettings(d: Db, p: { taxNo: string; salesDefault: string[]; pricesIncludeTax: boolean }) {
+    const t = d.company.tax || { country: 'BD', currency: countryByCode('BD').currency, taxNo: '', salesDefault: [], pricesIncludeTax: false }
+    d.company.tax = { ...t, ...p }
+  },
+  /** Add or change a rate. Every change is kept with its reason, so old bills and reports can be explained later. */
+  saveTaxRate(d: Db, p: { rate: Omit<TaxRate, 'id'> & { id?: string }; note: string; by: string; effective?: ISODate }) {
+    const r = p.rate
+    if (!r.name.trim()) throw new Error('Give the rate a name, e.g. VAT 15%')
+    if (!(r.rate >= 0 && r.rate <= 100)) throw new Error('The rate must be between 0 and 100 percent')
+    const list = (d.taxRates ??= [])
+    const cur = byId(list, r.id)
+    const area: ChangeArea = r.kind === 'income' || r.kind === 'withholding' ? 'tax' : 'vat'
+    if (cur) {
+      const changed = cur.rate !== r.rate || cur.active !== r.active || cur.name !== r.name || cur.appliesTo !== r.appliesTo || cur.kind !== r.kind
+      if (changed && !p.note.trim()) throw new Error('Write a short note on why the rate changed (for example the NBR order or budget)')
+      if (changed) note(d, { area, subject: cur.name === r.name ? r.name : `${cur.name} → ${r.name}`, from: `${cur.rate}%${cur.active ? '' : ' (off)'}`, to: `${r.rate}%${r.active ? '' : ' (off)'}`, note: p.note, by: p.by, effective: p.effective })
+      const { id: _id, ...rest } = r
+      Object.assign(cur, rest)
+    } else {
+      list.push({ ...r, id: uid(d, 'tx') })
+      note(d, { area, subject: `New rate: ${r.name}`, to: `${r.rate}%`, note: p.note || 'Added', by: p.by, effective: p.effective })
+    }
+  },
+  /** A note about VAT, tax, costing or anything else that changed, written by hand. */
+  addChangeNote(d: Db, p: { area: ChangeArea; subject: string; note: string; by: string; effective?: ISODate; from?: string; to?: string }) {
+    if (!p.subject.trim() || !p.note.trim()) throw new Error('Write what changed and the note')
+    note(d, p)
+  },
+  removeChangeNote(d: Db, id: string) {
+    mustFind(d.changeNotes || [], id, 'Note')
+    d.changeNotes = (d.changeNotes || []).filter((n) => n.id !== id)
+  },
+  /** A new cost per unit, with the reason (new supplier price, freight went up…). */
+  updateCost(d: Db, p: { productId: string; cost: number; note: string; by: string; date: ISODate }) {
+    const prod = mustFind(d.products, p.productId, 'Product')
+    if (!(p.cost >= 0)) throw new Error('Enter the new cost')
+    if (!p.note.trim()) throw new Error('Write why the cost changed')
+    if (prod.cost === p.cost) throw new Error('That is already the cost')
+    note(d, { area: 'costing', subject: `${prod.name}: cost per ${prod.unit}`, from: String(prod.cost), to: String(p.cost), note: p.note, by: p.by, date: p.date })
+    prod.cost = p.cost
+  },
+  payTax(d: Db, p: { kind: TaxKind; period: string; amount: number; method: string; ref: string; note: string; date: ISODate; attachments?: Attachment[] }) {
+    if (!(p.amount > 0)) throw new Error('Enter the amount paid')
+    if (!/^\d{4}-\d{2}$/.test(p.period)) throw new Error('Choose the month the tax is for')
+    ;(d.taxPayments ??= []).push({ ...p, id: uid(d, 'tp'), ts: tick(d) } satisfies TaxPayment)
+  },
+  removeTaxPayment(d: Db, id: string) {
+    mustFind(d.taxPayments || [], id, 'Tax payment')
+    d.taxPayments = (d.taxPayments || []).filter((x) => x.id !== id)
+  },
+
+  /* ----- account heads and regular expenses ----- */
+  saveAccountHead(d: Db, p: Omit<AccountHead, 'id'> & { id?: string }) {
+    const name = p.name.trim()
+    if (!name) throw new Error('Name the account, e.g. Rent or Bank charges')
+    const list = (d.accountHeads ??= [])
+    if (list.some((h) => h.name.toLowerCase() === name.toLowerCase() && h.id !== p.id)) throw new Error('There is already an account with that name')
+    const cur = byId(list, p.id)
+    if (cur) {
+      // the expenses keep their head by name: rename them with it
+      if (cur.name !== name) {
+        for (const e of d.expenses) if (e.head === cur.name) e.head = name
+        for (const a of d.expenseAccounts || []) if (a.head === cur.name) a.head = name
+      }
+      Object.assign(cur, { ...p, name })
+    } else list.push({ ...p, name, id: uid(d, 'ah') })
+  },
+  archiveAccountHead(d: Db, p: { id: string; archived: boolean }) {
+    mustFind(d.accountHeads || [], p.id, 'Account').archived = p.archived || undefined
+  },
+  /** Open (or change) a regular expense: rent, electricity, internet, a guard's wage. */
+  saveExpenseAccount(d: Db, p: Omit<ExpenseAccount, 'id'> & { id?: string }) {
+    if (!p.name.trim()) throw new Error('Name the expense, e.g. Warehouse rent')
+    if (p.frequency !== 'variable' && !(p.amount > 0)) throw new Error('Enter the amount for each period, or choose “Bill amount changes”')
+    if (p.end && p.end < p.start) throw new Error('The end date is before the start date')
+    const list = (d.expenseAccounts ??= [])
+    const cur = byId(list, p.id)
+    if (cur) {
+      if (cur.amount !== p.amount || cur.frequency !== p.frequency) {
+        note(d, { area: 'expense', subject: `${p.name}: regular amount`, from: `${cur.amount} ${cur.frequency}`, to: `${p.amount} ${p.frequency}`, note: 'Changed on the expense account', by: '' })
+      }
+      const { id: _id, ...rest } = p
+      Object.assign(cur, rest)
+    } else list.push({ ...p, id: uid(d, 'ea') })
+  },
+  /** A bill for a period, a payment (whole or part, before or after it is due), or a correction. */
+  expenseEntry(d: Db, p: Omit<ExpenseEntry, 'id' | 'ts'>) {
+    const a = mustFind(d.expenseAccounts || [], p.accountId, 'Expense account')
+    if (p.kind !== 'adjustment' && !(p.amount > 0)) throw new Error('Enter the amount')
+    if (p.kind === 'adjustment' && !p.amount) throw new Error('Enter the amount to add (+) or take off (−)')
+    if (p.kind === 'adjustment' && !p.note.trim()) throw new Error('Write why the balance is corrected')
+    if (p.kind === 'bill' && p.period && (d.expenseEntries || []).some((e) => e.accountId === a.id && e.kind === 'bill' && e.period === p.period)) throw new Error('There is already a bill for that period. Remove it first to enter a new one')
+    ;(d.expenseEntries ??= []).push({ ...p, id: uid(d, 'ee'), ts: tick(d) })
+  },
+  removeExpenseEntry(d: Db, id: string) {
+    mustFind(d.expenseEntries || [], id, 'Entry')
+    d.expenseEntries = (d.expenseEntries || []).filter((e) => e.id !== id)
+  },
+
+  /* ----- attachments ----- */
+  /** Keep a money receipt, bank slip or other document with a payment. The file is uploaded first; this links it. */
+  attach(d: Db, p: { target: AttachTarget; id: string; file: Attachment }) {
+    const rec = attachable(d, p.target, p.id)
+    if ((rec.attachments || []).length >= 10) throw new Error('Up to 10 files per payment')
+    rec.attachments = [...(rec.attachments || []), p.file]
+  },
+  detach(d: Db, p: { target: AttachTarget; id: string; fileId: string }) {
+    const rec = attachable(d, p.target, p.id)
+    rec.attachments = (rec.attachments || []).filter((f) => f.id !== p.fileId)
+    if (!rec.attachments.length) delete rec.attachments
   },
 
   /* ----- fixed assets ----- */
@@ -582,7 +720,7 @@ export const actions = {
     }
   },
   /** Money between the company and an investor: capital in or back, profit paid, or profit kept as capital. */
-  investorMoney(d: Db, p: { investorId: string; kind: Exclude<InvestorTxnKind, 'share'>; amount: number; method: string; note: string; date: ISODate }) {
+  investorMoney(d: Db, p: { investorId: string; kind: Exclude<InvestorTxnKind, 'share'>; amount: number; method: string; note: string; date: ISODate; attachments?: Attachment[] }) {
     const inv = mustFind(d.investors || [], p.investorId, 'Investor')
     if (!(p.amount > 0)) throw new Error('Enter the amount')
     const row = investorRows(d).find((r) => r.investor.id === inv.id)
@@ -655,6 +793,31 @@ function deliver(d: Db, p: Omit<Delivery, 'id' | 'ts' | 'dealerId'>) {
   // sample bills only show how delivery works; they never touch real stock
   if (!p.cancelled && !inv.sample) for (const l of lines) mustFind(d.products, l.productId, 'Product').stock -= l.qty
   ;(d.deliveries ??= []).push({ ...p, lines, dealerId: inv.dealerId, id: uid(d, p.cancelled ? 'CL-' : 'DL-'), ts: tick(d), sample: inv.sample || undefined })
+}
+
+/** Keep a dated "why" note for a change to VAT, tax, costing or currency. */
+function note(d: Db, n: Omit<ChangeNote, 'id' | 'ts' | 'date'> & { date?: ISODate }) {
+  ;(d.changeNotes ??= []).push({ ...n, date: n.date || new Date().toISOString().slice(0, 10), id: uid(d, 'cn'), ts: tick(d) })
+}
+
+function attachable(d: Db, kind: AttachTarget, id: string): { attachments?: Attachment[] } {
+  switch (kind) {
+    case 'collection': return mustFind(d.collections, id, 'Collection')
+    case 'supplierPayment': return mustFind(d.supplierPayments, id, 'Payment')
+    case 'factoryPayment': {
+      for (const o of d.factoryOrders) {
+        const pay = o.payments.find((x) => x.id === id)
+        if (pay) return pay
+      }
+      throw new Error('Payment not found')
+    }
+    case 'expense': return mustFind(d.expenses, id, 'Expense')
+    case 'advance': return mustFind(d.advances, id, 'Advance')
+    case 'investorTxn': return mustFind(d.investorTxns || [], id, 'Entry')
+    case 'transfer': return mustFind(d.transfers || [], id, 'Transfer')
+    case 'taxPayment': return mustFind(d.taxPayments || [], id, 'Tax payment')
+    case 'expenseEntry': return mustFind(d.expenseEntries || [], id, 'Entry')
+  }
 }
 
 function addTransportExpense(d: Db, p: { date: ISODate; amount: number; method: string; details: string; link: TransportLink }) {

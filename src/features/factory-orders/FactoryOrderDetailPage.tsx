@@ -1,5 +1,6 @@
 import { byId, byDateTs, fdate, fmt, foCalc, tk, type FactoryReceipt, type FactoryBill } from '@shared/domain'
 import { CustomView } from '@/components/CustomFields'
+import { ClipButton } from '@/components/attachments/Attachments'
 import { PageHead } from '@/components/PageHead'
 import { useBooks } from '@/core/store/context'
 import { PaySheet } from '@/features/payments/PaySheet'
@@ -159,6 +160,8 @@ export function FactoryOrderDetailPage({ id }: { id: string }) {
             { label: 'We paid', align: 'right', render: (r) => (r.paid ? tk(r.paid) : '') },
             { label: 'Factory billed', align: 'right', render: (r) => (r.billed ? tk(r.billed) : '') },
             { label: 'Balance after', align: 'right', render: (r) => <b className={r.bal > 0 ? 't-good' : r.bal < 0 ? 't-warn' : 't-muted'}>{r.expected && r.bal < 0 ? `We will owe ${tk(-r.bal)}` : balanceText(r.bal)}</b> },
+
+            { label: '', align: 'right', render: (r) => { const pay = o.payments.find((p) => p.id === r.id); return pay ? <ClipButton target="factoryPayment" id={pay.id} files={pay.attachments || []} title={`${o.id} payment`} /> : '' } },
           ]}
         />
       </Card>

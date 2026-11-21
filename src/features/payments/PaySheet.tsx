@@ -1,6 +1,8 @@
-import { byId, foCalc, num, supplierLedger, tk, todayISO } from '@shared/domain'
+import { useState } from 'react'
+import { byId, foCalc, num, supplierLedger, tk, todayISO , type Attachment } from '@shared/domain'
 import { MethodSelect } from '@/components/MethodSelect'
 import { useBooks } from '@/core/store/context'
+import { AttachField } from '@/components/attachments/Attachments'
 import { Field, FormSheet, useForm, useToast } from '@/ui'
 
 interface Props {
@@ -29,6 +31,7 @@ export function PaySheet({ kind = 'supplier', supplierId, purchaseId, orderId, c
     ? led.due > 0 ? `We owe ${led.supplier.name} ${tk(led.due)}.` : `${led.supplier.name} is settled. Nothing is due.`
     : oc && order ? `${oc.factory?.name} · ${order.id}: ${oc.balanceText}. Paying more than is billed is kept as an advance.` : null
 
+  const [files, setFiles] = useState<Attachment[]>([])
   return (
     <FormSheet title={v.kind === 'supplier' ? 'Pay supplier' : 'Pay factory'} crumb={crumb || 'Make payment'} submit="Save payment" note={note}
       onSubmit={() => {
@@ -37,10 +40,10 @@ export function PaySheet({ kind = 'supplier', supplierId, purchaseId, orderId, c
         if (v.kind === 'supplier') {
           if (!led) return 'Choose a supplier.'
           if (amount > led.due) return `That is more than the ${tk(led.due)} we owe this supplier.`
-          act('paySupplier', { supplierId: v.supplierId, purchaseId: v.purchaseId, amount, method: v.method, date: v.date, note: v.note.trim() })
+          act('paySupplier', { supplierId: v.supplierId, purchaseId: v.purchaseId, amount, method: v.method, date: v.date, note: v.note.trim() , attachments: files.length ? files : undefined })
         } else {
           if (!order) return 'Choose a factory order.'
-          act('payFactory', { orderId: v.orderId, amount, method: v.method, date: v.date, note: v.note.trim() || `Payment for ${order.id}` })
+          act('payFactory', { orderId: v.orderId, amount, method: v.method, date: v.date, note: v.note.trim() || `Payment for ${order.id}` , attachments: files.length ? files : undefined })
         }
         toast(`${tk(amount)} payment saved`)
       }}>
@@ -75,6 +78,7 @@ export function PaySheet({ kind = 'supplier', supplierId, purchaseId, orderId, c
       <Field label="Paid by"><MethodSelect {...bind('method')} /></Field>
       <Field label="Date"><input type="date" {...bind('date')} /></Field>
       <Field label="Note" wide={v.kind === 'factory'}><input {...bind('note')} placeholder="Optional" /></Field>
+      <AttachField value={files} onChange={setFiles} />
     </FormSheet>
   )
 }

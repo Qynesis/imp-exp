@@ -1,3 +1,4 @@
+import { ClipButton } from '@/components/attachments/Attachments'
 import { useMemo, useState } from 'react'
 import { byId, fdate, supplierLedger, tk } from '@shared/domain'
 import type { FeatureRouteProps } from '@/app/features'
@@ -109,6 +110,7 @@ function SupplierDetail({ led, onNewPurchase, onPay }: { led: ReturnType<typeof 
                 <span className="meta">{fdate(p.date)}</span>
                 <span className="name normal">{p.method} · {p.note || 'Payment'}{bill ? ` · ${bill.billNo}` : ''}</span>
                 <span className="amt">{tk(p.amount)}</span>
+                <ClipButton target="supplierPayment" id={p.id} files={p.attachments || []} title={`${led.supplier.name} payment`} />
               </div>
             )
           })}

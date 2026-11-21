@@ -1,6 +1,8 @@
-import { byId, INVESTOR_TXN, investorRows, num, tk, todayISO, type InvestorTxnKind } from '@shared/domain'
+import { useState } from 'react'
+import { byId, INVESTOR_TXN, investorRows, num, tk, todayISO, type InvestorTxnKind , type Attachment } from '@shared/domain'
 import { MethodSelect } from '@/components/MethodSelect'
 import { useBooks } from '@/core/store/context'
+import { AttachField } from '@/components/attachments/Attachments'
 import { Field, FormSheet, useForm, useToast, type SheetComponent } from '@/ui'
 
 type Kind = Exclude<InvestorTxnKind, 'share'>
@@ -12,6 +14,7 @@ export const InvestorMoneySheet: SheetComponent<{ investorId: string; kind?: Kin
   const toast = useToast()
   const row = investorRows(db).find((r) => r.investor.id === investorId)
   const [v, set, bind, nbind] = useForm({ kind: kind as string, amount: '', method: 'Cash', note: '', date: todayISO() })
+  const [files, setFiles] = useState<Attachment[]>([])
   if (!row || !byId(db.investors || [], investorId)) return null
   const k = v.kind as Kind
   const max = k === 'withdraw' ? row.capital : k === 'payout' || k === 'reinvest' ? row.available : null
@@ -20,7 +23,7 @@ export const InvestorMoneySheet: SheetComponent<{ investorId: string; kind?: Kin
       note={<>Capital now <b>{tk(row.capital)}</b> · profit waiting <b>{tk(row.available)}</b>. {k === 'reinvest' ? 'No money moves: their profit becomes capital and raises their ownership.' : k === 'invest' ? 'Comes into the cashbook.' : 'Goes out of the cashbook.'}</>}
       onSubmit={() => {
         const amount = num(v.amount)
-        const why = act('investorMoney', { investorId, kind: k, amount, method: v.method, note: v.note.trim(), date: v.date })
+        const why = act('investorMoney', { investorId, kind: k, amount, method: v.method, note: v.note.trim(), date: v.date , attachments: files.length ? files : undefined })
         if (why) return why
         toast(`${INVESTOR_TXN[k]}: ${tk(amount)}`)
       }}>
@@ -31,6 +34,7 @@ export const InvestorMoneySheet: SheetComponent<{ investorId: string; kind?: Kin
       {k !== 'reinvest' && <Field label={k === 'invest' ? 'Received in' : 'Paid from'}><MethodSelect {...bind('method')} /></Field>}
       <Field label="Date"><input type="date" {...bind('date')} max={todayISO()} /></Field>
       <Field label="Note" wide><input {...bind('note')} placeholder="Cheque number, reason…" /></Field>
+      <AttachField value={files} onChange={setFiles} />
     </FormSheet>
   )
 }

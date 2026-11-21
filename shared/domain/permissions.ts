@@ -18,6 +18,8 @@ export const PAGES: readonly (readonly [PageId, string])[] = [
   ['sales-analytics', 'Sales analytics'],
   ['cashbook', 'Cashbook and dues'],
   ['employees', 'Employees'],
+  ['expenses', 'Expenses (one-time and regular)'],
+  ['accounts', 'Accounts, tax and VAT'],
   ['fixed-assets', 'Fixed assets'],
   ['investors', 'Investors and profit sharing'],
   ['reports', 'Reports'],
@@ -66,6 +68,9 @@ const INHERITS: Partial<Record<PageId, PageId[]>> = {
   messages: ['sell', 'cashbook'],
   // whoever keeps the cashbook records what the company buys to keep
   'fixed-assets': ['cashbook'],
+  // whoever keeps the cashbook records expenses; accounts and VAT are for the accountant and the reports
+  expenses: ['cashbook'],
+  accounts: ['cashbook', 'reports'],
   // capital and profit sharing are for the people who see the reports
   investors: ['reports'],
 }

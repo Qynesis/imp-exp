@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { byId, fmt, fshort, invoiceDelivery, num, tk, todayISO, type ReturnCondition } from '@shared/domain'
+import { ScanBox } from '@/components/barcode/ScanBox'
 import { useBooks } from '@/core/store/context'
 import { Field, FormSheet, Segmented, useForm, useToast } from '@/ui'
 import { RETURN_REASONS } from '../returnReasons'
@@ -32,6 +33,28 @@ export function ReturnSheet({ invoiceId, dealerId }: { invoiceId?: string; deale
         if (refused) return refused
         toast(`Return saved${credit > 0 ? ` · ${tk(credit)} credited` : ''}`)
       }}>
+      <div className="wide-note">
+        <ScanBox hint="Scan the bill or challan, then each item that came back"
+          onText={(text) => {
+            const t = text.toUpperCase()
+            // a delivery challan number leads to its bill
+            const del = (db.deliveries || []).find((x) => x.id.toUpperCase() === t)
+            const bill = db.invoices.find((i) => i.status === 'final' && (i.id.toUpperCase() === t || i.id === del?.invoiceId))
+            if (!bill) return false
+            set('dealerId', bill.dealerId)
+            set('invoiceId', bill.id)
+            setQty({})
+            return true
+          }}
+          onScan={(hit) => {
+            if (!inv) return 'Scan the bill or challan first, or pick the invoice below'
+            const line = lines.find((l) => l.productId === hit.product.id)
+            if (!line) return `${hit.product.name} was not delivered on ${inv.id}`
+            const next = num(qty[line.productId]) + hit.qty
+            if (next > line.returnable) return `Only ${fmt(line.returnable)} ${line.unit} of ${line.name} can come back on this bill`
+            setQty({ ...qty, [line.productId]: String(next) })
+          }} />
+      </div>
       <Field label="Dealer">
         <select className="in" value={v.dealerId} onChange={(e) => { set('dealerId', e.target.value); set('invoiceId', ''); setQty({}) }}>
           {db.dealers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}

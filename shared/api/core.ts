@@ -665,6 +665,39 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       return done(pay.status)
     },
 
+    /* ----- attached documents (money receipts, slips, challans) ----- */
+    /** Keep a file for this company. The books only hold its id, name and size. */
+    'POST files': async (req) => {
+      const ctx = await auth(req)
+      needEditor(ctx)
+      await needActive(ctx)
+      const b = obj(req.body)
+      const name = str(b.name).trim().slice(0, 120) || 'document'
+      const type = str(b.type)
+      const data = str(b.data)
+      if (!/^(image\/(jpeg|png|webp|gif)|application\/pdf)$/.test(type)) throw bad('Attach a photo (JPG, PNG, WebP) or a PDF.')
+      if (!/^[A-Za-z0-9+/=]+$/.test(data)) throw bad('That file could not be read.')
+      const size = Math.floor((data.length * 3) / 4)
+      if (size > 3 * 1024 * 1024) throw bad('That file is larger than 3 MB. Take a smaller photo or compress the PDF.')
+      const id = 'f' + kit.randomHex(10)
+      await store.set(`file:${ctx.acc.tenantId}:${id}`, { name, type, size, data, at: new Date().toISOString(), by: ctx.email })
+      return { id, name, type, size }
+    },
+    'GET files': async (req) => {
+      const ctx = await auth(req)
+      const id = str(req.query.get('id'))
+      const f = /^f[0-9a-f]{20}$/.test(id) ? await store.get<{ name: string; type: string; data: string }>(`file:${ctx.acc.tenantId}:${id}`) : null
+      if (!f) throw new ApiFailure(404, 'That document is no longer there.')
+      return { name: f.name, type: f.type, data: f.data }
+    },
+    'DELETE files': async (req) => {
+      const ctx = await auth(req)
+      needEditor(ctx)
+      const id = str(req.query.get('id'))
+      if (/^f[0-9a-f]{20}$/.test(id)) await store.del(`file:${ctx.acc.tenantId}:${id}`)
+      return { ok: true }
+    },
+
     /* ----- assistant ----- */
     'GET assistant': async (req) => {
       await auth(req)

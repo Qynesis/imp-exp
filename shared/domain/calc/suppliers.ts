@@ -31,7 +31,7 @@ export const supplierLedger = (db: Db, supplierId: string): SupplierLedger =>
     if (supplier.opening > 0) bills.push({ id: 'opening', billNo: 'Opening', date: null, items: 'Opening balance', terms: 'credit', amount: supplier.opening, paid: 0 })
     for (const p of db.purchases.filter((x) => x.supplierId === supplierId).sort(byDateTs)) {
       const prod = byId(db.products, p.productId)
-      bills.push({ id: p.id, billNo: p.billNo, date: p.date, terms: p.terms, amount: p.qty * p.rate, paid: 0, items: `${prod?.name || 'Item'}, ${fmt(p.qty)} ${prod?.unit || ''}`.trim() })
+      bills.push({ id: p.id, billNo: p.billNo, date: p.date, terms: p.terms, amount: p.qty * p.rate + (p.tax || 0), paid: 0, items: `${prod?.name || 'Item'}, ${fmt(p.qty)} ${prod?.unit || ''}`.trim() })
     }
     const pays = db.supplierPayments.filter((p) => p.supplierId === supplierId).sort(byDateTs)
     for (const pay of pays) {

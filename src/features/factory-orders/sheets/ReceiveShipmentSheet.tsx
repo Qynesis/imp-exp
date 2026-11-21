@@ -1,5 +1,6 @@
 import { byId, fmt, foCalc, num, todayISO, tk, tripCalc, trips } from '@shared/domain'
 import { MethodSelect } from '@/components/MethodSelect'
+import { ScanBox } from '@/components/barcode/ScanBox'
 import { useBooks } from '@/core/store/context'
 import { Field, FormSheet, Segmented, useForm, useToast } from '@/ui'
 
@@ -35,6 +36,14 @@ export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
         act('receiveShipment', { orderId, date: v.date, challan: v.challan.trim(), qty, damaged: num(v.damaged), note: v.note.trim(), freight, freightInCost: v.freightMode === 'in', method: v.method })
         toast(`${fmt(qty)} ${c.unit} added to stock${freight ? ` · freight ${tk(freight)} saved` : ''}`)
       }}>
+      <div className="wide-note">
+        <ScanBox hint="Scan each pack or carton as it comes off the truck" onScan={(hit) => {
+          if (hit.product.id !== o.productId) return `${hit.product.name} is not on this order`
+          const next = num(v.qty) + hit.qty
+          if (next > c.pending) return `Only ${fmt(c.pending)} ${c.unit} are pending on this order`
+          set('qty', String(next))
+        }} />
+      </div>
       <Field label="Date received"><input type="date" {...bind('date')} /></Field>
       <Field label="Challan number"><input {...bind('challan')} placeholder="e.g. CH-320" /></Field>
       <Field label={`Good quantity received (${c.unit})`}><input {...nbind('qty')} placeholder={`Up to ${fmt(c.pending)}`} /></Field>

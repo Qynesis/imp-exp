@@ -5,6 +5,7 @@ import {
 } from '@shared/domain'
 import { downloadCsv } from '@/components/downloadCsv'
 import { PageHead } from '@/components/PageHead'
+import { LabelsSheet } from '@/features/products/sheets/LabelsSheet'
 import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
 import { NewFactoryOrderSheet } from '@/features/factory-orders/sheets/NewFactoryOrderSheet'
@@ -74,6 +75,7 @@ export default function RawMaterialsPage() {
       <PageHead title="Raw materials" sub="Materials and packaging that reach us by import, from local suppliers or from local factories." actions={
         <>
           <Button icon="download" variant="secondary" onClick={download}>Download list</Button>
+          <Button icon="barcode" variant="secondary" onClick={() => sheets.open(LabelsSheet, {})}>Barcode labels</Button>
           <Button icon="plus" variant="secondary" onClick={() => sheets.open(AddCategorySheet)}>Add category</Button>
           <Button icon="plus" onClick={() => sheets.open(ProductSheet, { kind: 'raw' })}>Add raw material</Button>
         </>

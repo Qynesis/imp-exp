@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
-import { addDays, availableQty, byId, dealerLedger, fdate, fmt, invoiceDue, invTotal, newestFirst, num, reservedQty, tk, todayISO, type Db, type DealerTerms, type Invoice, type InvoiceData, type SalesQuote } from '@shared/domain'
+import { addDays, availableQty, invTaxLines, moneySymbol, taxSettings, byId, dealerLedger, fdate, fmt, invoiceDue, invTotal, newestFirst, num, reservedQty, tk, todayISO, type Db, type DealerTerms, type Invoice, type InvoiceData, type SalesQuote } from '@shared/domain'
 import type { FeatureRouteProps } from '@/app/features'
 import { PageHead } from '@/components/PageHead'
+import { ScanBox } from '@/components/barcode/ScanBox'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, Field, Icon, Pill, Segmented, useConfirm, usePrint, useSheets, useToast } from '@/ui'
+import { Button, Card, cls, DataTable, Field, Icon, Pill, Segmented, useConfirm, usePrint, useSheets, useToast } from '@/ui'
 import { parcelDefaults, useCourier } from '@/features/courier/useCourier'
 import { InvoiceDoc } from './InvoiceDoc'
 import { InvoiceStatus } from './InvoiceStatus'
@@ -32,19 +33,31 @@ interface Draft {
   quoteId?: string
   validUntil?: string
   note?: string
+  /** Tax rates ticked for this bill, and whether the prices already include them. */
+  taxIds: string[]
+  taxInclusive: boolean
+}
+
+/** The company's default sales taxes for a new bill. */
+const defaultTaxes = (db: Db) => {
+  const t = db.company.tax
+  const live = new Set((db.taxRates || []).filter((r) => r.active && r.appliesTo !== 'purchases').map((r) => r.id))
+  return { taxIds: (t?.salesDefault || []).filter((id) => live.has(id)), taxInclusive: !!t?.pricesIncludeTax }
 }
 
 const blank = (db: Db, dealerId?: string): Draft => {
   const d = byId(db.dealers, dealerId) || db.dealers[0]
-  return { draftId: '', dealerId: d?.id || '', soldBy: d?.salesId || '', date: todayISO(), terms: d?.terms === 'cod' ? 'cod' : 'credit', lines: [], discount: '', received: '', method: 'Cash' }
+  return { ...defaultTaxes(db), draftId: '', dealerId: d?.id || '', soldBy: d?.salesId || '', date: todayISO(), terms: d?.terms === 'cod' ? 'cod' : 'credit', lines: [], discount: '', received: '', method: 'Cash' }
 }
 const fromInvoice = (inv: Invoice): Draft => ({
+  taxIds: (inv.taxes || []).map((t) => t.rateId || '').filter(Boolean), taxInclusive: !!inv.taxes?.some((t) => t.inclusive),
   draftId: inv.id, dealerId: inv.dealerId, soldBy: inv.soldBy, date: inv.date, terms: inv.terms, method: inv.method || 'Cash',
   lines: inv.lines.map((l) => ({ productId: l.productId, qty: String(l.qty), price: String(l.price) })),
   discount: String(inv.discount || ''), received: String(inv.received || ''),
 })
 
-const fromQuote = (q: SalesQuote): Draft => ({
+const fromQuote = (db: Db, q: SalesQuote): Draft => ({
+  ...defaultTaxes(db),
   draftId: '', dealerId: q.dealerId, soldBy: q.soldBy, date: todayISO(), terms: q.terms, method: 'Cash', quoteId: q.id, validUntil: q.validUntil, note: q.note,
   lines: q.lines.map((l) => ({ productId: l.productId, qty: String(l.qty), price: String(l.price) })), discount: String(q.discount || ''), received: '',
 })
@@ -60,7 +73,7 @@ export default function SellPage({ params }: FeatureRouteProps) {
   const msg = useMessaging()
   const [f, setF] = useState<Draft>(() => {
     const q = params[0] === 'quote' ? byId(db.quotes || [], params[1]) : undefined
-    return q && q.status !== 'invoiced' ? fromQuote(q) : blank(db, params[0] === 'new' ? params[1] : undefined)
+    return q && q.status !== 'invoiced' ? fromQuote(db, q) : blank(db, params[0] === 'new' ? params[1] : undefined)
   })
   const [deliverNow, setDeliverNow] = useState(false)
   const [err, setErr] = useState('')
@@ -76,9 +89,13 @@ export default function SellPage({ params }: FeatureRouteProps) {
     discount: num(f.discount),
     received: 0,
     lines: f.lines.map((l) => ({ productId: l.productId, qty: num(l.qty), price: num(l.price) })),
+    taxes: f.taxIds.map((id) => byId(db.taxRates || [], id)).filter((r) => !!r).map((r) => ({ rateId: r.id, name: r.name, kind: r.kind, rate: r.rate, inclusive: f.taxInclusive })),
   }
+  if (!data.taxes?.length) delete data.taxes
   const subtotal = data.lines.reduce((s, l) => s + l.qty * l.price, 0)
-  const total = subtotal - data.discount
+  const taxLines = invTaxLines(data)
+  const total = invTotal(data)
+  const salesRates = (db.taxRates || []).filter((r) => r.active && r.appliesTo !== 'purchases')
   data.received = f.terms === 'cod' ? total : num(f.received)
   const due = total - data.received
   const after = (led?.due || 0) + due
@@ -102,7 +119,7 @@ export default function SellPage({ params }: FeatureRouteProps) {
       // stock already billed to others is spoken for until it is delivered
       if (final && l.qty > availableQty(db, p)) return `Only ${fmt(Math.max(availableQty(db, p), 0))} ${p.unit} of ${p.name} is free to sell (${fmt(p.stock)} in the warehouse, ${fmt(reservedQty(db, p.id))} waiting for delivery).`
     }
-    if (data.discount < 0 || total <= 0) return 'The discount cannot be more than the subtotal.'
+    if (data.discount < 0 || subtotal - data.discount <= 0) return 'The discount cannot be more than the subtotal.'
     if (data.received < 0 || data.received > total) return 'Received now cannot be more than the invoice total.'
     if (final && f.terms === 'credit' && dealer.terms === 'cod' && due > 0) return `${dealer.name} is cash on delivery only. Take the full amount or change the dealer’s terms.`
     return ''
@@ -234,6 +251,12 @@ export default function SellPage({ params }: FeatureRouteProps) {
                 )
               })}
               <div className="lines-foot">
+                <ScanBox hint="Scan to add a product" onScan={(hit) => {
+                  const at = f.lines.findIndex((l) => l.productId === hit.product.id)
+                  if (hit.product.kind !== 'finished') return `${hit.product.name} is not for sale`
+                  if (at >= 0) setLine(at, { qty: String(num(f.lines[at].qty) + hit.qty) })
+                  else setF((s) => ({ ...s, lines: [...s.lines, { productId: hit.product.id, qty: String(hit.qty), price: String(hit.product.price || '') }] }))
+                }} />
                 <Button icon="plus" variant="dashed" size="sm" onClick={() => sheets.open(InvoiceLineSheet, {
                   taken: f.lines.map((l) => l.productId),
                   onAdd: (line) => setF((s) => ({ ...s, lines: [...s.lines, { productId: line.productId, qty: String(line.qty), price: String(line.price) }] })),
@@ -243,10 +266,27 @@ export default function SellPage({ params }: FeatureRouteProps) {
 
             <div className="totals">
               <div className="kv"><span>Subtotal</span><span>{tk(subtotal)}</span></div>
-              <label className="kv"><span>Discount (Tk)</span><input className="in sm" inputMode="decimal" value={f.discount} onChange={(e) => set({ discount: e.target.value })} placeholder="0" /></label>
+              <label className="kv"><span>Discount ({moneySymbol()})</span><input className="in sm" inputMode="decimal" value={f.discount} onChange={(e) => set({ discount: e.target.value })} placeholder="0" /></label>
+              {salesRates.length > 0 && (
+                <div className="kv tax-pick">
+                  <span>{taxSettings(db).taxName}</span>
+                  <span className="chips">
+                    {salesRates.map((r) => (
+                      <button key={r.id} type="button" className={cls('chip sm', f.taxIds.includes(r.id) && 'on')} aria-pressed={f.taxIds.includes(r.id)}
+                        onClick={() => set({ taxIds: f.taxIds.includes(r.id) ? f.taxIds.filter((x) => x !== r.id) : [...f.taxIds, r.id] })}>{r.name}</button>
+                    ))}
+                  </span>
+                </div>
+              )}
+              {taxLines.length > 0 && (
+                <label className="kv check-row"><span>Prices already include {taxSettings(db).taxName}</span><input type="checkbox" checked={f.taxInclusive} onChange={(e) => set({ taxInclusive: e.target.checked })} /></label>
+              )}
+              {taxLines.map((t) => (
+                <div className="kv" key={t.name}><span>{t.name}{t.inclusive ? ' (included in price)' : ''}</span><span>{tk(t.amount)}</span></div>
+              ))}
               <div className="kv total"><span>Invoice total</span><span>{tk(total)}</span></div>
               {f.terms === 'credit' ? (
-                <label className="kv"><span>Received now (Tk)</span><input className="in sm" inputMode="decimal" value={f.received} onChange={(e) => set({ received: e.target.value })} placeholder="0" /></label>
+                <label className="kv"><span>Received now ({moneySymbol()})</span><input className="in sm" inputMode="decimal" value={f.received} onChange={(e) => set({ received: e.target.value })} placeholder="0" /></label>
               ) : (
                 <div className="kv"><span>Received on delivery</span><span>{tk(total)}</span></div>
               )}

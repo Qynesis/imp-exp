@@ -279,6 +279,45 @@ enum SubscriptionPayStatus {
   cancelled
 }
 
+enum TaxKind {
+  vat
+  gst
+  sales
+  sd
+  withholding
+  income
+  other
+}
+
+enum TaxAppliesTo {
+  sales
+  purchases
+  both
+}
+
+enum ChangeArea {
+  vat
+  tax
+  costing
+  currency
+  expense
+  other
+}
+
+enum ExpenseFrequency {
+  daily
+  weekly
+  monthly
+  yearly
+  variable
+}
+
+enum ExpenseEntryKind {
+  bill
+  payment
+  adjustment
+}
+
 enum IntegrationKind {
   courier
   messaging
@@ -303,6 +342,8 @@ model Tenant {
   openingCash       Decimal        @default(0) @db.Decimal(14, 2)
   /// Opening money in bank and wallets, out of openingCash, e.g. Bank 290000 and bKash 35000.
   openingAccounts   Json           @default("{}")
+  /// TaxSettings: country, currency { code, symbol, grouping }, taxNo, salesDefault (rate ids), pricesIncludeTax.
+  taxSettings       Json?
   businessTypes     BusinessType[] @default([general])
   /// CourierSettings from types.ts (provider, autoBook, enabled, testMode). Keys live in IntegrationSecret.
   courierSettings   Json?
@@ -356,6 +397,13 @@ model Tenant {
   transfers        AccountTransfer[]
   subscription     Subscription?
   subPayments      SubscriptionPayment[]
+  taxRates         TaxRate[]
+  taxPayments      TaxPayment[]
+  changeNotes      ChangeNote[]
+  accountHeads     AccountHead[]
+  expenseAccounts  ExpenseAccount[]
+  expenseEntries   ExpenseEntry[]
+  files            StoredFile[]
 }
 
 /// The platform owner(s): see every company, open books, reset passwords. Not tied to a tenant.
@@ -485,6 +533,10 @@ model Product {
   lowAt      Decimal         @default(0) @db.Decimal(14, 3)
   sources    ProductSource[] @default([])
   archived   Boolean         @default(false)
+  /// Printed on labels and scanned; null: the code is used. Unique per tenant when set (partial index).
+  barcode    String?
+  /// Units per carton, for carton labels ("CODE*24").
+  perCarton  Decimal?        @db.Decimal(14, 3)
   custom     Json            @default("{}")
   legacyId   String?
   createdAt  DateTime        @default(now()) @db.Timestamptz(3)
@@ -741,15 +793,17 @@ model FactoryBill {
 
 /// Advance, partial or final payment to a factory. The payment history is printed and shared on WhatsApp.
 model FactoryPayment {
-  id        String       @id @default(uuid()) @db.Uuid
-  tenantId  String       @db.Uuid
-  orderId   String       @db.Uuid
-  order     FactoryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  date      DateTime     @db.Date
-  amount    Decimal      @db.Decimal(14, 2)
-  method    String
-  note      String       @default("")
-  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+  id          String       @id @default(uuid()) @db.Uuid
+  tenantId    String       @db.Uuid
+  orderId     String       @db.Uuid
+  order       FactoryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  date        DateTime     @db.Date
+  amount      Decimal      @db.Decimal(14, 2)
+  method      String
+  note        String       @default("")
+  /// [{ id, name, type, size }] of StoredFile rows: receipts and slips.
+  attachments Json?
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
 
   @@index([tenantId, date])
   @@index([orderId])
@@ -825,6 +879,8 @@ model Purchase {
   qty        Decimal           @db.Decimal(14, 3)
   rate       Decimal           @db.Decimal(14, 2)
   terms      SupplierTerms
+  /// Input VAT charged by the supplier, on top of qty × rate.
+  tax        Decimal?          @db.Decimal(14, 2)
   payments   SupplierPayment[]
   createdAt  DateTime          @default(now()) @db.Timestamptz(3)
 
@@ -833,18 +889,20 @@ model Purchase {
 }
 
 model SupplierPayment {
-  id         String    @id @default(uuid()) @db.Uuid
-  tenantId   String    @db.Uuid
-  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supplierId String    @db.Uuid
-  supplier   Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  purchaseId String?   @db.Uuid
-  purchase   Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
-  date       DateTime  @db.Date
-  amount     Decimal   @db.Decimal(14, 2)
-  method     String
-  note       String    @default("")
-  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplierId  String    @db.Uuid
+  supplier    Supplier  @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchaseId  String?   @db.Uuid
+  purchase    Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  date        DateTime  @db.Date
+  amount      Decimal   @db.Decimal(14, 2)
+  method      String
+  note        String    @default("")
+  /// [{ id, name, type, size }] of StoredFile rows: receipts and slips.
+  attachments Json?
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
 
   @@index([tenantId, supplierId, date])
   @@index([tenantId, date])
@@ -1037,6 +1095,7 @@ model Invoice {
   createdAt       DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
   lines           InvoiceLine[]
+  taxes           InvoiceTax[]
   deliveries      Delivery[]
   returns         SalesReturn[]
   collections     Collection[]
@@ -1159,6 +1218,8 @@ model Collection {
   method        String
   collectedById String?   @db.Uuid
   collectedBy   Employee? @relation(fields: [collectedById], references: [id], onDelete: SetNull)
+  /// [{ id, name, type, size }] of StoredFile rows: receipts and slips.
+  attachments   Json?
   createdAt     DateTime  @default(now()) @db.Timestamptz(3)
 
   @@index([tenantId, dealerId, date])
@@ -1220,6 +1281,8 @@ model Expense {
   factoryOrderId String?            @db.Uuid
   factoryOrder   FactoryOrder?      @relation(fields: [factoryOrderId], references: [id], onDelete: SetNull)
   odometer       Int?
+  /// [{ id, name, type, size }] of StoredFile rows: receipts and slips.
+  attachments    Json?
   createdAt      DateTime           @default(now()) @db.Timestamptz(3)
 
   @@index([tenantId, date])
@@ -1313,15 +1376,17 @@ model Trip {
 }
 
 model Advance {
-  id         String   @id @default(uuid()) @db.Uuid
-  tenantId   String   @db.Uuid
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  date       DateTime @db.Date
-  employeeId String   @db.Uuid
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  amount     Decimal  @db.Decimal(14, 2)
-  method     String
-  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  employeeId  String   @db.Uuid
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  amount      Decimal  @db.Decimal(14, 2)
+  method      String
+  /// [{ id, name, type, size }] of StoredFile rows: receipts and slips.
+  attachments Json?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([tenantId, employeeId, date])
 }
@@ -1459,6 +1524,8 @@ model InvestorTxn {
   note           String              @default("")
   distributionId String?             @db.Uuid
   distribution   ProfitDistribution? @relation(fields: [distributionId], references: [id], onDelete: Cascade)
+  /// [{ id, name, type, size }] of StoredFile rows: receipts and slips.
+  attachments    Json?
   createdAt      DateTime            @default(now()) @db.Timestamptz(3)
 
   @@index([tenantId, investorId, date])
@@ -1482,15 +1549,17 @@ model ProfitDistribution {
 
 /// Money moved between the company's own accounts (cash, bank, bKash). Never changes the total.
 model AccountTransfer {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @db.Uuid
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  date      DateTime @db.Date
-  from      String
-  to        String
-  amount    Decimal  @db.Decimal(14, 2)
-  note      String   @default("")
-  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  from        String
+  to          String
+  amount      Decimal  @db.Decimal(14, 2)
+  note        String   @default("")
+  /// [{ id, name, type, size }] of StoredFile rows: receipts and slips.
+  attachments Json?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([tenantId, date])
 }
@@ -1532,6 +1601,152 @@ model SubscriptionPayment {
   @@unique([tenantId, no])
   @@index([tranId])
   @@index([status])
+}
+
+/// ---------- tax, VAT, update notes ----------
+
+model TaxRate {
+  id        String       @id @default(uuid()) @db.Uuid
+  tenantId  String       @db.Uuid
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  kind      TaxKind
+  /// Percent.
+  rate      Decimal      @db.Decimal(7, 3)
+  appliesTo TaxAppliesTo
+  active    Boolean      @default(true)
+  note      String       @default("")
+
+  @@index([tenantId, active])
+}
+
+/// A tax on one bill, copied from the rate when the bill was made so later rate changes leave it alone.
+model InvoiceTax {
+  id        String  @id @default(uuid()) @db.Uuid
+  invoiceId String  @db.Uuid
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  rateId    String? @db.Uuid
+  name      String
+  kind      TaxKind
+  rate      Decimal @db.Decimal(7, 3)
+  /// The price already contains this tax.
+  inclusive Boolean
+  /// Worked out when the bill is made final (see 04 §4.15).
+  amount    Decimal @db.Decimal(14, 2)
+
+  @@index([invoiceId])
+}
+
+/// VAT or tax paid to the government.
+model TaxPayment {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  kind        TaxKind
+  /// 'YYYY-MM' the payment is for.
+  period      String   @db.Char(7)
+  amount      Decimal  @db.Decimal(14, 2)
+  method      String
+  /// Challan or receipt number.
+  ref         String   @default("")
+  note        String   @default("")
+  attachments Json?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, period])
+}
+
+/// "Why did this change?": kept whenever a VAT/tax rate, a cost, a regular expense amount or the currency changes.
+model ChangeNote {
+  id        String     @id @default(uuid()) @db.Uuid
+  tenantId  String     @db.Uuid
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date      DateTime   @db.Date
+  area      ChangeArea
+  subject   String
+  from      String?
+  to        String?
+  note      String
+  by        String
+  effective DateTime?  @db.Date
+  createdAt DateTime   @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, area, date])
+}
+
+/// ---------- account heads and regular expenses ----------
+
+model AccountHead {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @db.Uuid
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code     String
+  name     String
+  /// 'expense' | 'income'.
+  group    String
+  note     String  @default("")
+  archived Boolean @default(false)
+
+  @@unique([tenantId, name])
+}
+
+/// Rent, electricity, a guard's wage: charges build up each period, payments go against it in any number of parts.
+model ExpenseAccount {
+  id        String           @id @default(uuid()) @db.Uuid
+  tenantId  String           @db.Uuid
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  head      String
+  party     String           @default("")
+  phone     String           @default("")
+  frequency ExpenseFrequency
+  /// Charge per period; 0 for 'variable' (bills entered by hand).
+  amount    Decimal          @default(0) @db.Decimal(14, 2)
+  start     DateTime         @db.Date
+  end       DateTime?        @db.Date
+  note      String           @default("")
+  active    Boolean          @default(true)
+  entries   ExpenseEntry[]
+
+  @@index([tenantId, active])
+}
+
+model ExpenseEntry {
+  id          String           @id @default(uuid()) @db.Uuid
+  tenantId    String           @db.Uuid
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accountId   String           @db.Uuid
+  account     ExpenseAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  date        DateTime         @db.Date
+  kind        ExpenseEntryKind
+  /// Bills: 'YYYY-MM' (or a date for daily). One bill per period per account (partial unique index).
+  period      String?
+  amount      Decimal          @db.Decimal(14, 2)
+  method      String           @default("")
+  note        String           @default("")
+  attachments Json?
+  createdAt   DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, accountId, date])
+}
+
+/// ---------- attached documents ----------
+
+/// A money receipt, slip or challan. Bytes go to object storage (S3/R2); this row keeps where and what.
+model StoredFile {
+  id         String   @id @db.VarChar(24)
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name       String
+  type       String
+  size       Int
+  /// Object storage key, e.g. tenants/<tenantId>/files/<id>.
+  storageKey String
+  uploadedBy String
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, createdAt])
 }
 
 /**

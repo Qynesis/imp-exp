@@ -1,6 +1,6 @@
 import { AutoReminders } from '@/features/messages/AutoReminders'
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type LazyExoticComponent } from 'react'
-import type { PageId } from '@shared/domain'
+import { setMoney, type PageId } from '@shared/domain'
 import { POWERED_BY } from '@/config/brand'
 import { go, href, useRoute } from '@/core/router'
 import { accessGuard, useBooks } from '@/core/store/context'
@@ -74,6 +74,8 @@ export function Shell() {
 
   const Screen = SCREENS[feature.id]
   const co = db.company
+  // amounts everywhere follow the company's currency
+  setMoney(co.tax?.currency)
   return (
     <div className="shell">
       <aside className="side">

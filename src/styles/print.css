@@ -12,3 +12,24 @@
   .print-root { display: block; }
   .print-root .invoice { font-size: 12pt; }
 }
+
+/* ---------- barcode labels ---------- */
+.barcode { display: inline-flex; flex-direction: column; align-items: center; width: 100%; }
+.barcode svg { width: 100%; height: auto; max-height: 18mm; display: block; }
+.barcode-text { font: 600 9pt/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.04em; }
+.labels { display: grid; }
+.label { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1mm; padding: 2mm 3mm; overflow: hidden; break-inside: avoid; text-align: center; }
+.label-name { font: 600 8.5pt/1.15 var(--font); max-height: 2.4em; overflow: hidden; }
+.label-price { font: 700 9pt/1.1 var(--font); }
+.labels-a4-21 { grid-template-columns: repeat(3, 63.5mm); grid-auto-rows: 38.1mm; column-gap: 2.5mm; }
+.labels-a4-40 { grid-template-columns: repeat(4, 48.5mm); grid-auto-rows: 25.4mm; }
+.labels-a4-40 .label-name { font-size: 7pt; }
+.labels-roll { grid-template-columns: 50mm; grid-auto-rows: 25mm; }
+.labels-roll .label { break-after: page; }
+.inv-barcode { width: 52mm; margin-top: 2mm; }
+.inv-barcode .barcode-text { font-size: 8pt; }
+/* A4 label sheets need the standard sheet margins, not the 14 mm used for bills */
+@page labels-a4 { size: A4; margin: 13mm 7mm; }
+.labels-a4-21, .labels-a4-40 { page: labels-a4; margin: 0 auto; }
+@page labels-roll { size: 50mm 25mm; margin: 0; }
+.labels-roll { page: labels-roll; }

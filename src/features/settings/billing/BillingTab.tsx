@@ -100,7 +100,7 @@ export function BillingTab({ outcome }: { outcome: string }) {
           </section>
         ))}
       </div>
-      <p className="t-muted small-note">Paying before your access ends adds the new months after it, so no days are lost. Prices are in Taka and include everything; there is no limit on users or invoices.</p>
+      <p className="t-muted small-note">Paying before your access ends adds the new months after it, so no days are lost. Prices are in Bangladeshi Taka and include everything; there is no limit on users or invoices.</p>
 
       <Card icon="receipt" title="Payment history">
         <DataTable pageSize={10} rows={view?.payments || []} rowKey={(p) => p.id} empty={view ? 'No payments yet.' : 'Loading…'}

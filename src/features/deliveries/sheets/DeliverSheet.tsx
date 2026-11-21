@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { byId, fmt, invoiceDelivery, num, todayISO, type DeliveryVia } from '@shared/domain'
 import { useBooks } from '@/core/store/context'
+import { ScanBox } from '@/components/barcode/ScanBox'
 import { useMessaging, vars } from '@/features/messages/useMessaging'
 import { Button, Field, FormSheet, useForm, useToast } from '@/ui'
 
@@ -18,6 +19,8 @@ export function DeliverSheet({ invoiceId, tripId, receivedBy = '' }: { invoiceId
   const canGo = (l: { productId: string; remaining: number }) => Math.max(Math.min(l.remaining, stockOf(l.productId)), 0)
   const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries((d?.lines || []).map((l) => [l.productId, String(canGo(l))])))
   const [v, , bind] = useForm({ date: todayISO(), via: 'own' as DeliveryVia, receivedBy, note: '', notify: (msg.settings.auto.delivery || []).length > 0 ? 'yes' : 'no' })
+  // the first scan starts the count from zero, so the scans say exactly what was loaded
+  const [scanning, setScanning] = useState(false)
   if (!inv || !d) return null
   const dealer = byId(db.dealers, inv.dealerId)
   const going = d.lines.map((l) => ({ ...l, now: Math.min(num(qty[l.productId]), l.remaining) }))
@@ -46,6 +49,15 @@ export function DeliverSheet({ invoiceId, tripId, receivedBy = '' }: { invoiceId
           <Button size="sm" variant="secondary" onClick={() => setQty(Object.fromEntries(d.lines.map((l) => [l.productId, String(canGo(l))])))}>Deliver all that can go</Button>
           <Button size="sm" variant="secondary" onClick={() => setQty(Object.fromEntries(d.lines.map((l) => [l.productId, '0'])))}>Clear</Button>
         </div>
+        <ScanBox hint="Scan each pack or carton as it is loaded" onScan={(hit) => {
+          const line = d.lines.find((l) => l.productId === hit.product.id)
+          if (!line) return `${hit.product.name} is not on this bill`
+          const base = scanning ? qty : Object.fromEntries(d.lines.map((l) => [l.productId, '0']))
+          const next = num(base[line.productId]) + hit.qty
+          if (next > line.remaining) return `Only ${fmt(line.remaining)} ${line.unit} of ${line.name} is left on the bill`
+          setScanning(true)
+          setQty({ ...base, [line.productId]: String(next) })
+        }} />
         <div className="deliver-lines">
           {d.lines.map((l) => {
             const short = l.remaining > stockOf(l.productId)

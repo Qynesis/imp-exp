@@ -337,7 +337,67 @@ earlier in − out.
 - **When ended**: every write route answers 402 (books save, users, courier booking, sending messages). Reading still works. The platform owner, through "Open books", can still save.
 - The subscription is never part of the books, so no books save or restore can change it.
 
-## 4.15 Sample data
+## 4.15 Country, currency, tax and VAT
+
+- **Country presets** (`shared/domain/countries.ts`): Bangladesh, China, USA, India, Pakistan, UAE, Saudi Arabia, UK, EU and Malaysia, plus a custom option. Each preset gives the currency symbol, the digit grouping (lakh/crore or thousand/million), the name of the tax number (BIN, USCC, EIN, GSTIN…) and the usual rates. Every rate stays editable.
+- **Money formatting** follows the company (`setMoney`): `Tk 12,34,567`, `¥1,234,567`, `$1,500`, `Tk 25 L`, `¥2.5M`.
+- **Tax on a bill**:
+  - base = subtotal − discount;
+  - with inclusive taxes, net = base ÷ (1 + Σ inclusive rates); otherwise net = base;
+  - each tax = net × rate;
+  - what the dealer pays (`invTotal`) = base + exclusive taxes;
+  - revenue (`invNet`) = base − inclusive taxes.
+
+  Sales, P&L, sales analytics and commission use `invNet`; dues, the cashbook and courier COD use `invTotal`. A final bill keeps its own copy of each rate.
+- **VAT report** (`taxReport`):
+  - output = taxes on final real bills;
+  - input = VAT on purchases + import VAT and AT at customs release;
+  - advance tax = AIT and withholding;
+  - paid = `TaxPayment` rows;
+  - balance = all output − all input − all paid, up to the end date. Positive is owed to the government; negative is carried forward.
+- **Update notes**: changing a rate needs a note. Notes are also written automatically for cost changes (product form, `updateCost`), regular expense amount changes and currency changes.
+
+## 4.16 Expenses: one-time and regular
+
+- **One-time**: an `Expense` row, paid when entered.
+- **Regular** (`ExpenseAccount`): fixed accounts charge `amount` for every period from `start` to `end` or today (daily, weekly, monthly or yearly). A bill for a period replaces the automatic charge; variable accounts are charged only by bills.
+- **Payments**: any number of payments, in parts, early or late. Adjustments need a reason.
+- **Balance**: charges + adjustments − payments. Positive means due (বকেয়া); negative means paid ahead (অগ্রিম).
+- **P&L** counts regular charges in their period, paid or not, and never a charge whose day has not come yet. The cashbook counts the payments.
+- **Chart of accounts** shows the total due as "Expenses due" and the total paid ahead as "Expenses paid ahead".
+
+## 4.17 Chart of accounts
+
+`chartOfAccounts(db, from, to)` works everything out from the records:
+- assets 1000;
+- liabilities 2000;
+- equity 3000 (balances as of `to`);
+- income 4000, cost of sales 5000 and expenses 6000, one line per head (for the period);
+- costing 7000: purchases, import LC value and each import cost type, factory goods, freight in cost, workshop making;
+- VAT and tax 8000.
+
+Income − cost − expenses equals the P&L net for the same months; the tests check this.
+
+## 4.18 Barcodes
+
+- Code 128 (letters and digits). Its output was checked bar for bar against JsBarcode.
+- A product's barcode is `barcode`, else `code`. New internal barcodes are EAN-13 numbers in the 20–29 range.
+- **Carton labels** encode `CODE*qty`, so one scan counts the whole carton. `readScan` matches the barcode or code, ignoring case and spaces.
+- **Where scanning is used:**
+  - delivery: counting from zero, never more than is left on the bill;
+  - returns: scanning the bill or delivery challan first, never more than went out;
+  - factory receiving: never more than is pending;
+  - sale bills: adds a line or more of the same item.
+- Invoices and delivery challans print their number as a barcode, so the returns desk can scan the challan to find the bill.
+
+## 4.19 Attached documents
+
+- A payment can carry up to 10 files: dealer collections, supplier, factory and tax payments, expenses, salary advances, investor money, transfers and regular expense payments.
+- Photos are shrunk to 1600 px JPEG in the browser; PDFs are kept as sent, up to 3 MB.
+- Files are stored per company outside the books. The books keep `{ id, name, type, size }`.
+- Removing a file from a form deletes it. Detaching it from a saved payment keeps the stored copy for the audit trail.
+
+## 4.20 Sample data
 
 Sample data lets people try the delivery and courier screens.
 
@@ -349,7 +409,7 @@ Sample data lets people try the delivery and courier screens.
   transaction.
 - Every report query adds `AND NOT sample`. The partial indexes in 02 §2.3 keep this cheap.
 
-## 4.16 Roles in commands
+## 4.21 Roles in commands
 
 The permission guard checks the page level before the service runs (05 §5.4). Services also enforce:
 

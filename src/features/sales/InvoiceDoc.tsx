@@ -1,13 +1,16 @@
-import { byId, fdate, fmt, invSubtotal, invTotal, tk, type Db, type Invoice } from '@shared/domain'
+import { byId, fdate, fmt, invSubtotal, invTaxLines, invTotal, taxSettings, tk, type Db, type Invoice } from '@shared/domain'
+import { Barcode } from '@/components/barcode/Barcode'
 
 /** The printable invoice. Used for the live preview, for viewing old invoices and for printing. */
 /** With `estimate`, the same page becomes a price estimate: no payment lines, and how long the prices hold. */
-export function InvoiceDoc({ db, inv, estimate }: { db: Db; inv: Pick<Invoice, 'id' | 'status' | 'date' | 'dealerId' | 'terms' | 'lines' | 'discount' | 'received'>; estimate?: { validUntil: string; note: string } }) {
+export function InvoiceDoc({ db, inv, estimate }: { db: Db; inv: Pick<Invoice, 'id' | 'status' | 'date' | 'dealerId' | 'terms' | 'lines' | 'discount' | 'received'> & { taxes?: Invoice['taxes'] }; estimate?: { validUntil: string; note: string } }) {
   const dealer = byId(db.dealers, inv.dealerId)
   const co = db.company
   const total = invTotal(inv)
   const received = inv.received || 0
   const contact = [co.address, co.phone].filter(Boolean).join(' · ')
+  const tax = taxSettings(db)
+  const taxLines = invTaxLines(inv)
   return (
     <div className="invoice">
       <div className="inv-top">
@@ -16,11 +19,13 @@ export function InvoiceDoc({ db, inv, estimate }: { db: Db; inv: Pick<Invoice, '
           <div>
             <div className="inv-co">{co.name || 'Your company'}</div>
             {contact && <div className="inv-muted">{contact}</div>}
+            {tax.taxNo && <div className="inv-muted">{tax.taxNoLabel}: {tax.taxNo}</div>}
           </div>
         </div>
         <div className="inv-right">
           <div className="inv-title">{estimate ? 'Estimate' : inv.status === 'draft' ? 'Draft invoice' : 'Invoice'}</div>
           <div className="inv-muted">{inv.id} · {fdate(inv.date)}</div>
+          {inv.status === 'final' && !estimate && <Barcode className="inv-barcode" value={inv.id} height={30} />}
         </div>
       </div>
       <div className="inv-top">
@@ -56,6 +61,7 @@ export function InvoiceDoc({ db, inv, estimate }: { db: Db; inv: Pick<Invoice, '
       <div className="inv-sum">
         <div><span>Subtotal</span><span>{tk(invSubtotal(inv))}</span></div>
         {inv.discount > 0 && <div><span>Discount</span><span>{tk(inv.discount)}</span></div>}
+        {taxLines.map((t) => <div key={t.name}><span>{t.name}{t.inclusive ? ' (included)' : ''}</span><span>{tk(t.amount)}</span></div>)}
         <div className="total"><span>{estimate ? 'Estimated total' : 'Total'}</span><span>{tk(total)}</span></div>
         {!estimate && <div><span>Paid</span><span>{tk(received)}</span></div>}
         {!estimate && <div className="strong"><span>Due</span><span>{tk(total - received)}</span></div>}

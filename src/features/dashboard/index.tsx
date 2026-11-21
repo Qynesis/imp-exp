@@ -12,6 +12,7 @@ import { NewFactoryOrderSheet } from '@/features/factory-orders/sheets/NewFactor
 import { NewShipmentSheet } from '@/features/shipments/sheets/NewShipmentSheet'
 import { DeliverSheet } from '@/features/deliveries/sheets/DeliverSheet'
 import { Button, Card, cls, Empty, Icon, IconBadge, Pill, Progress, Stat, useSheets } from '@/ui'
+import { Shortcuts } from './Shortcuts'
 import { TodayPanel, WelcomeBar } from './TodayPanel'
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
@@ -39,6 +40,7 @@ export default function DashboardPage() {
         {can('imports') && <Button icon="ship" variant="secondary" onClick={() => sheets.open(NewShipmentSheet, {})}>New shipment</Button>}
         {can('factory-orders') && <Button icon="factory" variant="secondary" onClick={() => sheets.open(NewFactoryOrderSheet, {})}>Factory order</Button>}
       </WelcomeBar>
+      <Shortcuts />
       <TodayPanel />
 
       <div className="stats">

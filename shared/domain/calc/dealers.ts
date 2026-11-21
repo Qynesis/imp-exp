@@ -3,7 +3,30 @@ import type { Db, Dealer, Invoice, ISODate } from '../types'
 import { byDateTs, memo, mustFind, newestFirst, sum } from './common'
 
 export const invSubtotal = (inv: Pick<Invoice, 'lines'>): number => sum(inv.lines, (l) => l.qty * l.price)
-export const invTotal = (inv: Pick<Invoice, 'lines' | 'discount'>): number => invSubtotal(inv) - (inv.discount || 0)
+
+const r2 = (n: number) => Math.round(n * 100) / 100
+type Taxed = Pick<Invoice, 'lines' | 'discount' | 'taxes'>
+
+/**
+ * Each tax on a bill and its amount. Taxes work on the bill after discount. An inclusive tax is already
+ * inside the price, so it is taken out of the price; an exclusive tax is added on top.
+ */
+export function invTaxLines(inv: Taxed): (NonNullable<Invoice['taxes']>[number] & { amount: number })[] {
+  const taxes = inv.taxes || []
+  if (!taxes.length) return []
+  const base = invSubtotal(inv) - (inv.discount || 0)
+  const incRate = sum(taxes.filter((t) => t.inclusive), (t) => t.rate)
+  // the value before inclusive taxes: base = net × (1 + incRate/100)
+  const net = incRate > 0 ? base / (1 + incRate / 100) : base
+  return taxes.map((t) => ({ ...t, amount: r2((net * t.rate) / 100) }))
+}
+/** Tax on a bill (inclusive and exclusive). */
+export const invTax = (inv: Taxed): number => r2(sum(invTaxLines(inv), (t) => t.amount))
+/** Sales value without any tax: what counts as revenue. */
+export const invNet = (inv: Taxed): number => r2(invSubtotal(inv) - (inv.discount || 0) - sum(invTaxLines(inv).filter((t) => t.inclusive), (t) => t.amount))
+/** What the dealer pays: after discount, plus any tax added on top. */
+export const invTotal = (inv: Pick<Invoice, 'lines' | 'discount'> & { taxes?: Invoice['taxes'] }): number =>
+  r2(invSubtotal(inv) - (inv.discount || 0) + sum(invTaxLines(inv).filter((t) => !t.inclusive), (t) => t.amount))
 
 export interface Debt {
   /** Invoice id, or 'opening' for the balance brought into the books. */
