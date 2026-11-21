@@ -67,8 +67,25 @@ export function Assistant() {
     if (open) end.current?.scrollIntoView({ block: 'end' })
   }, [turns, busy, open])
   useEffect(() => {
-    if (open) input.current?.focus()
+    if (!open) return
+    // on phones the chat covers the screen: keep the page behind it still, and let Escape (or a keyboard's back) close it
+    document.documentElement.classList.add('chat-open')
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    // only jump into the box on a real keyboard; on phones the keyboard would cover half the chat at once
+    if (window.matchMedia('(min-width: 861px)').matches) input.current?.focus()
+    return () => {
+      document.documentElement.classList.remove('chat-open')
+      window.removeEventListener('keydown', onKey)
+    }
   }, [open])
+  // the box grows with what is typed, up to about five lines
+  useEffect(() => {
+    const el = input.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+  }, [text, open])
 
   const ask = async (q: string) => {
     const question = q.trim()
