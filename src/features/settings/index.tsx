@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent } from 'react'
-import { BUSINESS_TYPES, CUSTOM_ENTITIES, FIELD_TYPES, isDb, PAGES, roleLevel, roleName, todayISO, type BusinessTypeId, type CustomEntity, type Role, type User } from '@shared/domain'
+import { BUSINESS_TYPES, CUSTOM_ENTITIES, FIELD_TYPES, isDb, PAGES, roleLevel, roleName, SEE_KEYS, todayISO, type BusinessTypeId, type CustomEntity, type Role, type User } from '@shared/domain'
 import type { FeatureRouteProps } from '@/app/features'
 import { PageHead } from '@/components/PageHead'
 import { BACKEND } from '@/core/api/client'
@@ -17,7 +17,8 @@ const accessSummary = (role: Role) => {
   const of = (lvl: 'edit' | 'view') => PAGES.filter(([p]) => roleLevel(role, p) === lvl).map(([, l]) => l)
   const edit = of('edit')
   const view = of('view')
-  return [edit.length && `Edit: ${edit.join(', ')}`, view.length && `View: ${view.join(', ')}`].filter(Boolean).join(' · ') || 'No access'
+  const special = SEE_KEYS.filter((k) => role.see?.[k.key] ?? role.id === 'accountant').map((k) => k.label.replace('See ', 'sees '))
+  return [edit.length && `Edit: ${edit.join(', ')}`, view.length && `View: ${view.join(', ')}`, special.length ? `Also ${special.join(' and ')}` : 'No prices or profit'].filter(Boolean).join(' · ') || 'No access'
 }
 
 type Tab = 'general' | 'billing'

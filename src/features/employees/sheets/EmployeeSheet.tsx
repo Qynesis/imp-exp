@@ -13,6 +13,8 @@ export function EmployeeSheet({ employeeId }: { employeeId?: string }) {
     salary: cur?.salary ? String(cur.salary) : '', rate: cur?.rate ? String(cur.rate) : '',
     commissionOn: (cur?.commissionOn || 'sales') as Employee['commissionOn'],
     joined: cur?.joined || todayISO(),
+    department: cur?.department || '', address: cur?.address || '', nid: cur?.nid || '', emergency: cur?.emergency || '', note: cur?.note || '',
+    salesTarget: cur?.salesTarget ? String(cur.salesTarget) : '',
   }))
   const sales = v.payType === 'sales'
   return (
@@ -22,12 +24,16 @@ export function EmployeeSheet({ employeeId }: { employeeId?: string }) {
         if (!v.name.trim()) return 'Enter the employee name.'
         if (!sales && num(v.salary) <= 0) return 'Enter the monthly salary.'
         if (sales && num(v.rate) <= 0) return 'Enter the commission rate.'
-        act('saveEmployee', { ...v, id: cur?.id, name: v.name.trim(), salary: sales ? 0 : num(v.salary), rate: sales ? num(v.rate) : 0 })
+        act('saveEmployee', {
+          ...v, id: cur?.id, name: v.name.trim(), salary: sales ? 0 : num(v.salary), rate: sales ? num(v.rate) : 0, salesTarget: num(v.salesTarget) || undefined,
+          department: v.department.trim(), address: v.address.trim(), nid: v.nid.trim(), emergency: v.emergency.trim(), note: v.note.trim(),
+        })
         toast(cur ? 'Employee updated' : 'Employee added')
       }}>
       <Field label="Name"><input {...bind('name')} placeholder="Full name" /></Field>
       <Field label="Phone"><input {...bind('phone')} inputMode="tel" placeholder="01XXX-XXXXXX" /></Field>
-      <Field label="Role"><input {...bind('role')} placeholder="e.g. Driver" /></Field>
+      <Field label="Job title"><input {...bind('role')} placeholder="e.g. Sales officer, Driver" /></Field>
+      <Field label="Department"><input {...bind('department')} placeholder="e.g. Sales, Warehouse, Office" /></Field>
       <Field label="Pay type">
         <select {...bind('payType')}>
           <option value="salary">Salary basis</option>
@@ -37,6 +43,7 @@ export function EmployeeSheet({ employeeId }: { employeeId?: string }) {
       {sales ? (
         <>
           <Field label="Commission rate (%)"><input {...nbind('rate')} placeholder="e.g. 2" /></Field>
+          <Field label="Monthly sales target (Tk)"><input {...nbind('salesTarget')} placeholder="Optional" /></Field>
           <Field label="Commission on">
             <select {...bind('commissionOn')}>
               <option value="sales">Sales amount</option>
@@ -48,6 +55,10 @@ export function EmployeeSheet({ employeeId }: { employeeId?: string }) {
         <Field label="Monthly salary (Tk)"><input {...nbind('salary')} placeholder="0" /></Field>
       )}
       <Field label="Joining date"><input type="date" {...bind('joined')} /></Field>
+      <Field label="NID number"><input {...bind('nid')} placeholder="National ID" /></Field>
+      <Field label="Emergency contact"><input {...bind('emergency')} placeholder="Name and phone" /></Field>
+      <Field label="Address" wide><input {...bind('address')} placeholder="Present address" /></Field>
+      <Field label="Note" wide><input {...bind('note')} placeholder="Duties, shift, anything to remember" /></Field>
     </FormSheet>
   )
 }

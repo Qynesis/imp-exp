@@ -1,3 +1,5 @@
+import { useSee } from '@/app/useSee'
+import { Hidden } from '@/components/Hidden'
 import { useMemo, useState } from 'react'
 import {
   atFactory, byId, categoryPath, fmt, fshort, inCategory, incomingStock, isLowStock, lastsFor, PRODUCT_SOURCES, productSources, productSuppliers, stockSummary, tk,
@@ -30,6 +32,7 @@ const ROUTES: { source: ProductSource; icon: IconName; title: string; text: stri
 
 export default function RawMaterialsPage() {
   const { db } = useBooks()
+  const see = useSee()
   const sheets = useSheets()
   const [catPick, setCat] = useState('')
   const [kind, setKind] = useState<KindFilter>('all')
@@ -61,7 +64,7 @@ export default function RawMaterialsPage() {
   const download = () => downloadCsv(`raw-materials-${todayISO()}.csv`,
     ['Material', 'Code', 'Kind', 'Category', 'Comes from', 'Usual supplier', 'Unit', 'In warehouse', 'On the way', 'At factories', 'Used in 90 days', 'Cost per unit', 'Stock value', 'Goes into'],
     rows.map((r) => [r.name, r.code, r.kind === 'raw' ? 'Raw material' : 'Packaging', categoryPath(db, r.categoryId), r.from.map((s) => PRODUCT_SOURCES[s]).join('; '),
-      r.offers.find((o) => o.preferred)?.name || '', r.unit, r.stock, r.coming.reduce((s, i) => s + i.qty, 0), r.f.lyingQty, r.pace.out, r.cost, Math.max(r.stock, 0) * r.cost,
+      r.offers.find((o) => o.preferred)?.name || '', r.unit, r.stock, r.coming.reduce((s, i) => s + i.qty, 0), r.f.lyingQty, r.pace.out, see.cost ? r.cost : '', see.cost ? Math.max(r.stock, 0) * r.cost : '',
       r.uses.map((u) => u.product.name).join('; ')]))
 
   const restock = (s: ProductSource, productId?: string) => {
@@ -83,9 +86,9 @@ export default function RawMaterialsPage() {
       <StockTabs current="raw-materials" />
 
       <div className="stats">
-        <Stat icon="layers" label="In the warehouse" value={tk(sum.value.raw + sum.value.packaging)} sub={`${fmt(sum.count.raw)} raw materials · ${fmt(sum.count.packaging)} packaging`} />
+        <Stat icon="layers" label="In the warehouse" value={see.cost ? tk(sum.value.raw + sum.value.packaging) : <Hidden />} sub={`${fmt(sum.count.raw)} raw materials · ${fmt(sum.count.packaging)} packaging`} />
         <Stat icon="ship" label="On the way" value={fmt(incoming.length)} sub={`${fmt(incoming.filter((i) => i.source === 'import').length)} imports · ${fmt(incoming.filter((i) => i.source === 'factory').length)} factory orders`} />
-        <Stat icon="factory" label="Lying at factories" value={tk(lyingValue)} sub="Handed over, not used yet" />
+        <Stat icon="factory" label="Lying at factories" value={see.cost ? tk(lyingValue) : <Hidden />} sub="Handed over, not used yet" />
         <Stat icon="alert" label="Low stock" value={fmt(lowCount)} tone={lowCount ? 'warn' : undefined} sub={lowCount ? 'Time to reorder' : 'All above their alert level'} />
       </div>
 
@@ -156,7 +159,7 @@ export default function RawMaterialsPage() {
               } },
               { label: 'At factories', align: 'right', render: (r) => (r.f.lyingQty > 0 ? <span>{fmt(r.f.lyingQty)} {r.unit}</span> : <span className="t-muted">None</span>) },
               { label: 'Goes into', render: (r) => (r.uses.length ? <span className="t-muted">{r.uses.map((u) => u.product.name).join(', ')}</span> : <span className="t-muted">Not in a recipe</span>) },
-              { label: 'Cost per unit', align: 'right', render: (r) => (r.cost ? tk(r.cost) : '') },
+              { label: 'Cost per unit', align: 'right', render: (r) => (!see.cost ? <Hidden /> : r.cost ? tk(r.cost) : '') },
             ]}
           />
         </Card>

@@ -1,3 +1,5 @@
+import { useSee } from '@/app/useSee'
+import { Hidden } from '@/components/Hidden'
 import { useMemo } from 'react'
 import { byId, fdate, fmt, fshort, shipmentCalc, stepLabel, tk, todayISO, type Shipment, type ShipmentCalc, type StepKey } from '@shared/domain'
 import type { FeatureRouteProps } from '@/app/features'
@@ -13,6 +15,7 @@ import { NewShipmentSheet } from './sheets/NewShipmentSheet'
 
 /** #/imports and #/imports/<shipment id> */
 export default function ShipmentsPage({ params: [id] }: FeatureRouteProps) {
+  const see = useSee()
   const { db } = useBooks()
   const sheets = useSheets()
   const rows = useMemo(() => db.imports.map((s) => ({ ...s, c: shipmentCalc(db, s) })), [db])
@@ -37,7 +40,7 @@ export default function ShipmentsPage({ params: [id] }: FeatureRouteProps) {
             { label: 'LC or contract', render: (r) => r.lcNo },
             { label: 'Invoice value', align: 'right', render: (r) => `USD ${fmt(r.usd)}` },
             { label: 'Status', render: (r) => <Pill tone={r.c.tone}>{r.c.status}</Pill> },
-            { label: 'Landed cost or margin', align: 'right', render: (r) => <b>{r.c.exp ? `Margin ${tk(r.c.margin)}` : tk(r.c.landed)}</b> },
+            { label: 'Landed cost or margin', align: 'right', render: (r) => (see.cost ? <b>{r.c.exp ? `Margin ${tk(r.c.margin)}` : tk(r.c.landed)}</b> : <Hidden />) },
           ]}
         />
       </Card>
@@ -47,6 +50,7 @@ export default function ShipmentsPage({ params: [id] }: FeatureRouteProps) {
 }
 
 function ShipmentDetail({ shipment: s }: { shipment: Shipment }) {
+  const see = useSee()
   const { db, act } = useBooks()
   const sheets = useSheets()
   const toast = useToast()
@@ -67,6 +71,7 @@ function ShipmentDetail({ shipment: s }: { shipment: Shipment }) {
   return (
     <div className="stack">
       <div className="grid2">
+        {see.cost ? (
         <Card title={`${c.exp ? 'Export costs and margin' : 'Landed cost'} · ${s.id}`}
           action={<div className="btn-row tight-row">
             {!c.exp && !s.steps.warehouse?.date && <Button icon="truck" variant="secondary" size="sm" className="edit-only" onClick={() => sheets.open(TripSheet, { purpose: 'pickup', shipmentId: s.id })}>Pickup from port</Button>}
@@ -89,6 +94,7 @@ function ShipmentDetail({ shipment: s }: { shipment: Shipment }) {
           </div>
           <CustomView entity="shipment" record={s} />
         </Card>
+        ) : <Card title={`Shipment · ${s.id}`}><div className="card-body pt0"><p className="t-muted">{fmt(s.qty)} {s.unit} of {c.productName}. Values, costs and landed cost are hidden for your role.</p></div><CustomView entity="shipment" record={s} /></Card>}
         <Card title={`Shipment steps · ${s.id}`}>
           <div className="rows">
             {c.keys.map((k) => {

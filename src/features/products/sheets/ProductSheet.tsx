@@ -1,3 +1,4 @@
+import { useSee } from '@/app/useSee'
 import { byId, duplicateOf, newBarcode, num, PRODUCT_KINDS, PRODUCT_SOURCES, UNITS, type CustomValues, type ProductKind, type ProductSource, type RecipeLine } from '@shared/domain'
 import { CustomFields } from '@/components/CustomFields'
 import { useBooks } from '@/core/store/context'
@@ -9,6 +10,7 @@ const toggle = <T,>(list: T[], x: T): T[] => (list.includes(x) ? list.filter((y)
 /** Add a product, or edit one when `productId` is given. `kind` sets what a new one starts as. */
 export function ProductSheet({ productId, kind = 'finished' }: { productId?: string; kind?: ProductKind }) {
   const { db, act, session } = useBooks()
+  const see = useSee()
   const me = db.users.find((u) => u.id === session.userId)
   const toast = useToast()
   const cur = byId(db.products, productId)
@@ -85,7 +87,7 @@ export function ProductSheet({ productId, kind = 'finished' }: { productId?: str
       <Field label="Unit">
         <select {...bind('unit')}>{UNITS.map((u) => <option key={u}>{u}</option>)}</select>
       </Field>
-      <Field label="Cost per unit (Tk)" hint={cur ? 'Updated by purchases, imports and workshop batches.' : undefined}><input {...nbind('cost')} placeholder="0" /></Field>
+      {see.cost && <Field label="Cost per unit (Tk)" hint={cur ? 'Updated by purchases, imports and workshop batches.' : undefined}><input {...nbind('cost')} placeholder="0" /></Field>}
       {cur && num(v.cost) !== cur.cost && <Field label="Why the cost changed" hint="Kept in Accounts → Update notes"><input {...bind('costNote')} placeholder="e.g. New supplier price from 1 Dec" /></Field>}
       {forSale && <Field label="Dealer price (Tk)"><input {...nbind('price')} placeholder="0" /></Field>}
       {!cur && <Field label="Opening stock"><input {...nbind('stock')} placeholder="0" /></Field>}

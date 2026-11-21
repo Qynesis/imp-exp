@@ -26,7 +26,7 @@ interface ServerState {
 export default function AuthPage() {
   const { signIn, status } = useStore()
   const [server, setServer] = useState<ServerState>({ state: 'checking', demo: null, problem: '', local: false })
-  const [mode, setMode] = useState<Mode>('login')
+  const [mode, setMode] = useState<Mode>(() => (window.location.hash.startsWith('#/signup') ? 'signup' : 'login'))
   const [v, set, bind] = useForm({ company: '', name: '', email: '', password: '', businessTypes: ['general'] as BusinessTypeId[], sample: false })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -75,6 +75,7 @@ export default function AuthPage() {
   return (
     <div className="auth">
       <div className="auth-side">
+        <a className="auth-home" href="#/">← Back to home</a>
         <Logo height={96} light />
         <b>Books for importers and exporters</b>
         <p>Factory orders, LC shipments, customs clearance, stock, dealer sales, dues and payroll. One private set of books for each company.</p>

@@ -1,4 +1,4 @@
-import type { AccessLevel, Db, PageId, Permissions, Role } from './types'
+import type { AccessLevel, Db, PageId, Permissions, Role, SeeKey } from './types'
 
 /** Every screen a role can be given access to, in menu order, with the label used in the role editor. */
 export const PAGES: readonly (readonly [PageId, string])[] = [
@@ -33,9 +33,10 @@ const perms = (edit: PageId[], view: PageId[] = []): Permissions =>
 
 export const defaultRoles = (): Role[] => [
   { id: OWNER_ROLE_ID, name: 'Owner', system: true, perms: {} },
-  { id: 'accountant', name: 'Accountant', perms: perms(['suppliers', 'cashbook', 'employees', 'customs'], ['dashboard', 'dealers', 'reports', 'imports', 'factory-orders', 'raw-materials']) },
-  { id: 'sales', name: 'Sales', perms: perms(['sell', 'dealers'], ['products']) },
-  { id: 'warehouse', name: 'Warehouse', perms: perms(['factory-orders', 'products', 'raw-materials'], ['imports', 'customs']) },
+  { id: 'accountant', name: 'Accountant', perms: perms(['suppliers', 'cashbook', 'employees', 'customs'], ['dashboard', 'dealers', 'reports', 'imports', 'factory-orders', 'raw-materials']), see: { cost: true, profit: true } },
+  { id: 'sales', name: 'Sales', perms: perms(['sell', 'dealers'], ['products']), see: { cost: false, profit: false } },
+  // the warehouse receives goods from suppliers and factories, so it sees suppliers and what they send, but not the prices
+  { id: 'warehouse', name: 'Warehouse', perms: perms(['factory-orders', 'products', 'raw-materials', 'deliveries', 'suppliers'], ['imports', 'customs']), see: { cost: false, profit: false } },
 ]
 
 /** What a user may do on a screen. The Owner role can do everything. */
@@ -73,6 +74,21 @@ const INHERITS: Partial<Record<PageId, PageId[]>> = {
   accounts: ['cashbook', 'reports'],
   // capital and profit sharing are for the people who see the reports
   investors: ['reports'],
+}
+
+/** Special permissions, as the role editor lists them. */
+export const SEE_KEYS: { key: SeeKey; label: string; hint: string }[] = [
+  { key: 'cost', label: 'See buying prices and costs', hint: 'Cost per unit, supplier and factory prices, stock value, landed cost' },
+  { key: 'profit', label: 'See profit and margins', hint: 'Gross profit, margins and profit reports' },
+]
+
+/** Whether someone may see costs or profit. The Owner always can; a role without a setting follows its default. */
+export function canSee(db: Pick<Db, 'users' | 'roles'>, userId: string, key: SeeKey): boolean {
+  const user = db.users.find((u) => u.id === userId)
+  const role = user && db.roles.find((r) => r.id === user.roleId)
+  if (!role) return false
+  if (role.id === OWNER_ROLE_ID) return true
+  return role.see?.[key] ?? role.id === 'accountant'
 }
 
 export const isAdmin = (db: Pick<Db, 'users' | 'roles'>, userId: string): boolean => levelFor(db, userId, 'settings') === 'edit'

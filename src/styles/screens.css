@@ -418,3 +418,15 @@ textarea.in { min-height: 96px; padding: 10px 12px; resize: vertical; font: inhe
 @media (max-width: 860px) { .auth-features { grid-template-columns: repeat(4, minmax(0, 1fr)); } .auth-features li { font-size: 11.5px; padding: 8px 4px; } }
 @media (max-width: 520px) { .auth-features { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .sheet .shortcuts { margin-bottom: 18px; }
+.labels-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.labels-filters select.in { width: auto; min-width: 150px; }
+.labels-filters .grow { min-width: 200px; }
+.labels-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 12px; border-radius: 12px; background: var(--fill); }
+.labels-bulk-set { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+.labels-bulk-set .in.sm { width: 64px; }
+.label-row.on { border-color: #9fcbbf; background: #f3faf8; }
+@media (max-width: 719px) { .labels-bulk-set { margin-left: 0; } .labels-filters select.in { flex: 1 1 45%; } }
+.hidden-fig { color: var(--muted); letter-spacing: 0.15em; cursor: help; }
+.perm-see { display: flex; flex-direction: column; gap: 10px; }
+.perm-see label { display: flex; align-items: flex-start; gap: 10px; font-size: 14.5px; cursor: pointer; }
+.perm-see small { display: block; color: var(--muted); font-size: 12.5px; }

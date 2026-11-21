@@ -4,7 +4,7 @@
  * the tools for screens their role can open, so the assistant never tells anyone more than the app would.
  */
 import {
-  accountBalances, assetSummary, byId, cashForDay, dealerLedger, fmonth, foCalc, investorRows, invoiceDelivery, invTotal, levelFor, notifications,
+  accountBalances, assetSummary, byId, canSee, cashForDay, dealerLedger, fmonth, foCalc, investorRows, invoiceDelivery, invTotal, levelFor, notifications,
   payables, pendingDeliveries, profitAndLoss, profitPool, receivables, reservedQty, saleFacts, thisMonth, todayISO, totalsBetween, tradeOverview, type Db, type PageId,
 } from '../domain'
 
@@ -227,12 +227,24 @@ export const TOOLS: ToolDef[] = [
 /** The tools this person may use, from their role. */
 export const toolsFor = (db: Db, userId: string): ToolDef[] => TOOLS.filter((t) => t.pages.some((p) => levelFor(db, userId, p) !== 'none'))
 
+const COST_KEYS = ['cost', 'stockValue', 'costOfGoods', 'unitCost', 'lastRate', 'avgRate']
+const PROFIT_KEYS = ['profit', 'grossProfit', 'netProfit', 'margin']
+/** A copy of a tool's answer without the fields this person may not see. */
+function strip(v: unknown, hide: Set<string>): unknown {
+  if (Array.isArray(v)) return v.map((x) => strip(x, hide))
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([k]) => !hide.has(k)).map(([k, x]) => [k, strip(x, hide)]))
+  return v
+}
+
 /** Run one tool for one person. Never throws: problems come back as `{ error }` for the model to read. */
 export function runTool(db: Db, userId: string, name: string, input: unknown): string {
   const tool = toolsFor(db, userId).find((t) => t.name === name)
   if (!tool) return JSON.stringify({ error: 'That information is not available to your role.' })
   try {
-    return JSON.stringify(tool.run(db, input && typeof input === 'object' ? (input as Record<string, unknown>) : {}, (p) => levelFor(db, userId, p) !== 'none'))
+    const out = tool.run(db, input && typeof input === 'object' ? (input as Record<string, unknown>) : {}, (p) => levelFor(db, userId, p) !== 'none')
+    // the same special permissions as the screens: no buying prices or profit for roles without them
+    const hide = new Set([...(canSee(db, userId, 'cost') ? [] : COST_KEYS), ...(canSee(db, userId, 'profit') ? [] : PROFIT_KEYS)])
+    return JSON.stringify(hide.size ? strip(out, hide) : out)
   } catch (e) {
     return JSON.stringify({ error: e instanceof Error ? e.message : 'Could not read that.' })
   }

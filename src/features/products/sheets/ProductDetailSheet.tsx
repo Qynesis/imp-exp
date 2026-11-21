@@ -1,3 +1,5 @@
+import { useSee } from '@/app/useSee'
+import { Hidden } from '@/components/Hidden'
 import { useState } from 'react'
 import {
   atFactory, byId, categoryPath, fmt, fshort, isLowStock, lastsFor, PRODUCT_KINDS, PRODUCT_SOURCES, productInUse, productSources, productSuppliers, recipeInfo,
@@ -19,6 +21,7 @@ const HISTORY_STEP = 10
 /** Everything about one product: stock, where it comes from, its recipe or what uses it, and every movement. */
 export const ProductDetailSheet: SheetComponent<{ productId: string }> = ({ productId }) => {
   const { db, act } = useBooks()
+  const see = useSee()
   const sheets = useSheets()
   const toast = useToast()
   const confirm = useConfirm()
@@ -85,10 +88,10 @@ export const ProductDetailSheet: SheetComponent<{ productId: string }> = ({ prod
       </p>
       <div className="mini-stats">
         <div><span>In warehouse</span><b className={isLowStock(p) ? 't-warn' : ''}>{fmt(p.stock)} {p.unit}</b></div>
-        <div><span>Stock value</span><b>{tk(Math.max(p.stock, 0) * p.cost)}</b></div>
-        <div><span>Cost per {one}</span><b>{p.cost ? tk(p.cost) : 'Not set'}</b></div>
+        <div><span>Stock value</span><b>{see.cost ? tk(Math.max(p.stock, 0) * p.cost) : <Hidden />}</b></div>
+        <div><span>Cost per {one}</span><b>{!see.cost ? <Hidden /> : p.cost ? tk(p.cost) : 'Not set'}</b></div>
         {p.kind === 'finished'
-          ? <div><span>Dealer price</span><b>{p.price ? tk(p.price) : 'Not set'}</b>{margin !== 0 && <small className={margin < 0 ? 't-warn' : 't-good'}> {margin < 0 ? 'loss' : 'margin'} {tk(Math.abs(margin))}</small>}</div>
+          ? <div><span>Dealer price</span><b>{p.price ? tk(p.price) : 'Not set'}</b>{margin !== 0 && see.profit && <small className={margin < 0 ? 't-warn' : 't-good'}> {margin < 0 ? 'loss' : 'margin'} {tk(Math.abs(margin))}</small>}</div>
           : <div><span>Used in</span><b>{uses.length ? `${uses.length} product${uses.length === 1 ? '' : 's'}` : 'None yet'}</b></div>}
         <div>
           <span>Stock lasts</span>
@@ -110,7 +113,7 @@ export const ProductDetailSheet: SheetComponent<{ productId: string }> = ({ prod
               <button key={r.productId} type="button" className="row click" onClick={() => sheets.open(ProductDetailSheet, { productId: r.productId })}>
                 <span className="name normal">{r.name}</span>
                 <span className={'meta' + (r.enoughFor === recipe.canMake ? ' t-warn' : '')}>{fmt(r.stock)} {r.unit} in stock · enough for {fmt(r.enoughFor)}</span>
-                <span className="amt">{fmt(r.qty)} {r.unit}{r.costPerUnit ? <small className="t-muted"> · {tk(r.costPerUnit)}</small> : null}</span>
+                <span className="amt">{fmt(r.qty)} {r.unit}{r.costPerUnit && see.cost ? <small className="t-muted"> · {tk(r.costPerUnit)}</small> : null}</span>
               </button>
             ))}
             <div className="row">

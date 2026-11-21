@@ -43,7 +43,11 @@ export interface Role {
   /** System roles (Owner) always have full access and cannot be edited or removed. */
   system?: boolean
   perms: Permissions
+  /** Special permissions beyond screens. Missing: only the Owner (and, by default, the Accountant) sees them. */
+  see?: Partial<Record<SeeKey, boolean>>
 }
+/** cost: buying prices, cost per unit, stock value, factory rates, landed costs. profit: profit and margins. */
+export type SeeKey = 'cost' | 'profit'
 
 export interface User {
   id: string
@@ -162,6 +166,11 @@ export interface Factory {
   phone: string
   address: string
   makes: string
+  /** Missing in older books. */
+  email?: string
+  note?: string
+  /** No longer used: kept for history, left out of pickers. */
+  archived?: boolean
 }
 
 export interface FactoryReceipt extends Dated {
@@ -615,6 +624,12 @@ export interface Employee {
   joined: ISODate
   /** Monthly sales target in Taka for sales staff; missing or 0 means none set. */
   salesTarget?: number
+  /** Job details; missing in older books. */
+  department?: string
+  address?: string
+  nid?: string
+  emergency?: string
+  note?: string
 }
 export interface PayrollLine {
   employeeId: string

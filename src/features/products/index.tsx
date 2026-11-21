@@ -1,3 +1,5 @@
+import { useSee } from '@/app/useSee'
+import { Hidden } from '@/components/Hidden'
 import { useMemo, useState } from 'react'
 import {
   byId, categoryPath, reservedQty, fmt, inCategory, incomingStock, isLowStock, lastsFor, PRODUCT_SOURCES, productSources, recipeInfo, stockSummary, tk, todayISO, usageRate,
@@ -21,6 +23,7 @@ const FINISHED: readonly ProductKind[] = ['finished']
 /** Finished goods we sell. Raw materials and packaging have their own screen. */
 export default function ProductsPage() {
   const { db } = useBooks()
+  const see = useSee()
   const sheets = useSheets()
   const [catPick, setCat] = useState('')
   const [show, setShow] = useState<Show>('all')
@@ -42,7 +45,7 @@ export default function ProductsPage() {
 
   const download = () => downloadCsv(`finished-goods-${todayISO()}.csv`,
     ['Product', 'Code', 'Category', 'Comes from', 'Unit', 'In warehouse', 'On the way', 'Out in 90 days', 'Cost per unit', 'Stock value', 'Dealer price'],
-    rows.map((r) => [r.name, r.code, categoryPath(db, r.categoryId), r.from.map((s) => PRODUCT_SOURCES[s]).join('; '), r.unit, r.stock, r.coming.reduce((s, i) => s + i.qty, 0), r.pace.out, r.cost, Math.max(r.stock, 0) * r.cost, r.price]))
+    rows.map((r) => [r.name, r.code, categoryPath(db, r.categoryId), r.from.map((s) => PRODUCT_SOURCES[s]).join('; '), r.unit, r.stock, r.coming.reduce((s, i) => s + i.qty, 0), r.pace.out, see.cost ? r.cost : '', see.cost ? Math.max(r.stock, 0) * r.cost : '', r.price]))
 
   return (
     <>
@@ -56,7 +59,7 @@ export default function ProductsPage() {
       } />
       <StockTabs current="products" />
       <div className="stats">
-        <Stat icon="box" label="Finished goods value" value={tk(sum.value.finished)} sub={`${fmt(sum.count.finished)} products at cost`} />
+        <Stat icon="box" label="Finished goods value" value={see.cost ? tk(sum.value.finished) : <Hidden />} sub={`${fmt(sum.count.finished)} products at cost`} />
         <Stat icon="route" label="On the way" value={fmt(incoming.length)} sub={`${fmt(incoming.filter((i) => i.source === 'factory').length)} factory orders · ${fmt(incoming.filter((i) => i.source === 'import').length)} imports`} />
         <Stat icon="alert" label="Low stock" value={fmt(lowCount)} tone={lowCount ? 'warn' : undefined} sub={lowCount ? 'Need ordering or making' : 'All above their alert level'} />
         <button type="button" className="card stat has-icon stat-link" onClick={() => go('raw-materials')}>
@@ -115,7 +118,7 @@ export default function ProductsPage() {
               } },
               { label: 'Cost / price', align: 'right', render: (r) => (
                 <span className="two-line right">
-                  <span>{r.cost ? tk(r.cost) : <span className="t-muted">No cost</span>}</span>
+                  <span>{!see.cost ? <Hidden /> : r.cost ? tk(r.cost) : <span className="t-muted">No cost</span>}</span>
                   <small className="t-muted">{r.price ? `Sells at ${tk(r.price)}` : 'No price'}</small>
                 </span>
               ) },

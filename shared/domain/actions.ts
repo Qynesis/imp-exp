@@ -17,7 +17,7 @@ import { investorRows, profitPool, splitProfit } from './calc/investors'
 import type {
   Advance, BusinessTypeId, Category, Collection, Company, CustomsInfo, CustomsStage, Dealer, Db, Direction, Employee, Expense, Factory,
   FactoryOrderType, FieldDef, ISODate, Invoice, Delivery, FactoryEstimate, MaterialGiven, MessageLog, MessagingSettings, SalesQuote, SalesReturn, MaterialSettlement, Parcel, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
-  CustomValues, FixedAsset, Investor, InvestorTxnKind, Attachment, ChangeArea, ChangeNote, Currency, ExpenseAccount, ExpenseEntry, TaxKind, TaxPayment, TaxRate, AccountHead, AttachTarget,
+  CustomValues, Role, FixedAsset, Investor, InvestorTxnKind, Attachment, ChangeArea, ChangeNote, Currency, ExpenseAccount, ExpenseEntry, TaxKind, TaxPayment, TaxRate, AccountHead, AttachTarget,
 } from './types'
 
 const tick = (d: Db) => ++d.seq.ts
@@ -56,10 +56,10 @@ export const actions = {
     Object.assign(d.company, p)
   },
 
-  saveRole(d: Db, p: { id?: string; name: string; perms: Permissions }) {
+  saveRole(d: Db, p: { id?: string; name: string; perms: Permissions; see?: Role['see'] }) {
     const cur = byId(d.roles, p.id)
-    if (cur) Object.assign(cur, { name: p.name, perms: p.perms })
-    else d.roles.push({ id: uid(d, 'role'), name: p.name, perms: p.perms })
+    if (cur) Object.assign(cur, { name: p.name, perms: p.perms, see: p.see })
+    else d.roles.push({ id: uid(d, 'role'), name: p.name, perms: p.perms, see: p.see })
   },
   removeRole(d: Db, id: string) {
     d.roles = d.roles.filter((r) => r.id !== id || r.system)
@@ -126,6 +126,21 @@ export const actions = {
 
   addFactory(d: Db, p: Omit<Factory, 'id'>) {
     d.factories.push({ id: uid(d, 'f'), ...p })
+  },
+  /** Add a factory or change its details. */
+  saveFactory(d: Db, p: Omit<Factory, 'id'> & { id?: string }) {
+    const name = p.name.trim()
+    if (!name) throw new Error('Enter the factory name')
+    if (d.factories.some((f) => f.id !== p.id && f.name.toLowerCase() === name.toLowerCase())) throw new Error('There is already a factory with that name')
+    const cur = byId(d.factories, p.id)
+    if (cur) {
+      const { id: _id, ...rest } = p
+      Object.assign(cur, { ...rest, name })
+    } else d.factories.push({ ...p, name, id: uid(d, 'f') })
+  },
+  /** Stop using a factory: it leaves the pickers, its orders and history stay. */
+  archiveFactory(d: Db, p: { id: string; archived: boolean }) {
+    mustFind(d.factories, p.id, 'Factory').archived = p.archived || undefined
   },
   newFactoryOrder(d: Db, p: NewFactoryOrderInput) {
     const id = 'FO-' + d.seq.fo++

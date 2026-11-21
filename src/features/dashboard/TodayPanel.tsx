@@ -1,3 +1,5 @@
+import { useSee } from '@/app/useSee'
+import { Hidden } from '@/components/Hidden'
 import type { ReactNode } from 'react'
 import { accountBalances, accountOf, cashForDay, investorRows, invTotal, payables, receivables, sum, tk, todayISO, totalsBetween } from '@shared/domain'
 import { useAccess } from '@/app/useAccess'
@@ -43,6 +45,7 @@ export function WelcomeBar({ sub, children }: { sub?: string; children?: ReactNo
 /** Today in numbers: stock and profit, sales, cash, balances, and every taka in and out. */
 export function TodayPanel() {
   const { db } = useBooks()
+  const see = useSee()
   const { level } = useAccess()
   const today = todayISO()
   const can = (p: Parameters<typeof level>[0]) => level(p) !== 'none'
@@ -65,10 +68,10 @@ export function TodayPanel() {
     <>
       <div className="glance-grid">
         <Glance icon="box" title="Stock and profit" to={link('reports')}>
-          <Line label="Stock value" value={stockValue} />
+          {see.cost ? <Line label="Stock value" value={stockValue} /> : <div className="kv"><span>Stock value</span><Hidden /></div>}
           <Line label="Today’s sales" value={t.sales} />
-          <Line label="Today’s cost of goods" value={t.cost} />
-          <Line label="Today’s profit" value={t.profit} tone={t.profit < 0 ? 'warn' : 'good'} />
+          {see.cost ? <Line label="Today’s cost of goods" value={t.cost} /> : <div className="kv"><span>Today’s cost of goods</span><Hidden /></div>}
+          {see.profit ? <Line label="Today’s profit" value={t.profit} tone={t.profit < 0 ? 'warn' : 'good'} /> : <div className="kv"><span>Today’s profit</span><Hidden what="profit" /></div>}
         </Glance>
         <Glance icon="cart" title="Sales today" to={link('sales-analytics') || link('sell')}>
           <Line label="Total sales" value={t.sales} />

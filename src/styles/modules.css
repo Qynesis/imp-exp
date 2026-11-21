@@ -104,3 +104,5 @@
 .powered-auth b { color: #fff; }
 .powered-line { font-size: 13px; color: var(--muted); margin-top: -12px; }
 .powered-line b { color: var(--ink); }
+.auth-home { color: #cfe0db; font-size: 14px; text-decoration: none; align-self: flex-start; }
+.auth-home:hover { color: #fff; text-decoration: underline; }

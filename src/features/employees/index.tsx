@@ -4,6 +4,7 @@ import { useBooks } from '@/core/store/context'
 import { AddExpenseSheet } from '@/features/cashbook/sheets/AddExpenseSheet'
 import { Button, Card, DataTable, Stat, useSheets } from '@/ui'
 import { EmployeeSheet } from './sheets/EmployeeSheet'
+import { EmployeeProfileSheet } from './sheets/EmployeeProfileSheet'
 import { PayrollSheet } from './sheets/PayrollSheet'
 
 export default function EmployeesPage() {
@@ -11,7 +12,7 @@ export default function EmployeesPage() {
   const sheets = useSheets()
   const month = thisMonth()
   const pr = payrollFor(db, month)
-  const edit = (r: { e: Employee }) => sheets.open(EmployeeSheet, { employeeId: r.e.id })
+  const edit = (r: { e: Employee }) => sheets.open(EmployeeProfileSheet, { employeeId: r.e.id })
   return (
     <>
       <PageHead title="Employees" sub={`${fmonth(month)} · salary staff are paid a fixed amount, sales staff earn commission on what they sell.`} actions={
@@ -26,15 +27,14 @@ export default function EmployeesPage() {
         <Stat icon="tag" label="Commission still to pay" value={tk(pr.commissionToPay)} sub={`${tk(pr.commission)} earned this month`} />
         <Stat icon="wallet" label="Advances already given" value={tk(pr.advances)} />
       </div>
-      <Card title="Salary basis" sub="Fixed monthly salary. Advances are taken off automatically.">
+      <Card title="Salary basis" sub="Fixed monthly salary. Advances are taken off automatically. Tap a person for their profile.">
         <DataTable
           rows={pr.salary}
           rowKey={(r) => r.e.id}
           onRow={edit}
           empty="No salary-basis employees yet."
           columns={[
-            { label: 'Employee', primary: true, render: (r) => r.e.name },
-            { label: 'Role', render: (r) => r.e.role },
+            { label: 'Employee', primary: true, render: (r) => <span className="two-line"><b>{r.e.name}</b><small className="t-muted">{[r.e.role, r.e.department].filter(Boolean).join(' · ')}</small></span> },
             { label: 'Monthly salary', align: 'right', render: (r) => tk(r.salary) },
             { label: 'Advance taken', align: 'right', render: (r) => tk(r.advance) },
             { label: 'Already paid', align: 'right', render: (r) => tk(r.paid) },
@@ -49,7 +49,7 @@ export default function EmployeesPage() {
           onRow={edit}
           empty="No sales-basis employees yet."
           columns={[
-            { label: 'Employee', primary: true, render: (r) => r.e.name },
+            { label: 'Employee', primary: true, render: (r) => <span className="two-line"><b>{r.e.name}</b><small className="t-muted">{r.e.salesTarget ? `${Math.round((r.sold / r.e.salesTarget) * 100)}% of target` : r.e.role}</small></span> },
             { label: 'Dealers handled', render: (r) => plural(r.dealers, 'dealer') },
             { label: 'Sales this month', align: 'right', render: (r) => tk(r.sold) },
             { label: 'Money collected', align: 'right', render: (r) => tk(r.collected) },

@@ -1,3 +1,5 @@
+import { useSee } from '@/app/useSee'
+import { Hidden } from '@/components/Hidden'
 import { useState } from 'react'
 import {
   addDays, breakdown, byId, change, currentAnchor, dealerLedger, fdate, fday, fmt, nextAnchor, parse, periodOf, previousPeriod, runningTotals,
@@ -38,6 +40,7 @@ function sellingDaysLeft(monthEnd: string): number {
 
 export default function SalesAnalyticsPage() {
   const { db } = useBooks()
+  const see = useSee()
   const sheets = useSheets()
   const [grain, setGrainState] = useState<Grain>('day')
   const [anchor, setAnchor] = useState(currentAnchor('day'))
@@ -75,7 +78,7 @@ export default function SalesAnalyticsPage() {
 
   const download = () => downloadCsv(`sales-${grain}-${period.anchor || 'all-years'}.csv`,
     [grain === 'day' ? 'Date' : grain === 'month' ? 'Month' : 'Year', 'Sales', 'Gross profit', 'Margin', 'Invoices', 'Units', 'Collected'],
-    series.map((b) => [b.long, Math.round(b.sales), Math.round(b.profit), b.sales ? pct(b.profit / b.sales) : '', b.invoices, b.units, Math.round(b.collected)]))
+    series.map((b) => [b.long, Math.round(b.sales), see.profit ? Math.round(b.profit) : '', see.profit && b.sales ? pct(b.profit / b.sales) : '', b.invoices, b.units, Math.round(b.collected)]))
 
   const running = grain !== 'year' ? runningTotals(db, period) : []
   const monthTarget = targets.company?.target || 0
@@ -112,7 +115,8 @@ export default function SalesAnalyticsPage() {
 
       <div className="stats">
         <Stat icon="receipt" label={`Sales · ${period.label}`} value={tk(totals.sales)} sub={before ? <Delta now={totals.sales} before={before.sales} against={prevLabel} /> : `${fmt(totals.invoices)} invoices`} />
-        <Stat icon="trend" label="Gross profit" value={tk(totals.profit)} sub={totals.sales ? `${pct(totals.profit / totals.sales)} margin on cost of goods` : 'No sales yet'} />
+        {see.profit ? <Stat icon="trend" label="Gross profit" value={tk(totals.profit)} sub={totals.sales ? `${pct(totals.profit / totals.sales)} margin on cost of goods` : 'No sales yet'} />
+          : <Stat icon="trend" label="Units sold" value={fmt(totals.units)} sub={`${fmt(totals.invoices)} invoices`} />}
         <Stat icon="grid" label="Invoices" value={fmt(totals.invoices)} sub={totals.invoices ? `Average ${tk(Math.round(totals.sales / totals.invoices))} · ${fmt(totals.units)} units` : 'None yet'} />
         <Stat icon="wallet" label="Collected" value={tk(totals.collected)} sub="Cash on sales plus dealer payments" />
       </div>
@@ -122,9 +126,9 @@ export default function SalesAnalyticsPage() {
         action={<Segmented label="Chart or table" value={view} onChange={setView} options={[{ value: 'chart', label: 'Chart' }, { value: 'table', label: 'Table' }]} />}>
         {view === 'chart' ? (
           <ColumnChart
-            data={series.map((b) => ({ key: b.key, short: b.short, long: b.long, value: b.sales, line: b.future ? null : b.profit, faded: b.future,
+            data={series.map((b) => ({ key: b.key, short: b.short, long: b.long, value: b.sales, line: b.future || !see.profit ? null : b.profit, faded: b.future,
               extra: [['invoices', fmt(b.invoices)], ['collected', tkShort(b.collected)]] }))}
-            valueName="Sales" lineName="Gross profit" format={tk} height={280}
+            valueName="Sales" lineName={see.profit ? 'Gross profit' : undefined} format={tk} height={280}
             pickHint={grain === 'day' ? 'Click to list this day’s invoices' : grain === 'month' ? 'Click to open this month' : 'Click to open this year'}
             onPick={(d) => {
               const b = series.find((x) => x.key === d.key)
@@ -138,8 +142,8 @@ export default function SalesAnalyticsPage() {
             columns={[
               { label: grain === 'day' ? 'Day' : grain === 'month' ? 'Month' : 'Year', primary: true, render: (b) => b.long },
               { label: 'Sales', align: 'right', render: (b) => <b>{tk(b.sales)}</b> },
-              { label: 'Gross profit', align: 'right', render: (b) => tk(b.profit) },
-              { label: 'Margin', align: 'right', render: (b) => (b.sales ? pct(b.profit / b.sales) : '') },
+              { label: 'Gross profit', align: 'right', render: (b) => (see.profit ? tk(b.profit) : <Hidden what="profit" />) },
+              { label: 'Margin', align: 'right', render: (b) => (!see.profit ? '' : b.sales ? pct(b.profit / b.sales) : '') },
               { label: 'Invoices', align: 'right', render: (b) => fmt(b.invoices) },
               { label: 'Collected', align: 'right', render: (b) => tk(b.collected) },
             ]} />
@@ -177,7 +181,7 @@ export default function SalesAnalyticsPage() {
 
       <div className="grid2">
         <Card icon="box" title="Best-selling products" sub={period.label}>
-          <BarList format={tk} empty="No sales in this period." rows={bd.products.map((p) => ({ id: p.id, name: p.name, value: p.sales, note: `${fmt(p.qty)} ${p.sub} · ${p.sales ? pct(p.profit / p.sales) : '0%'} margin` }))} />
+          <BarList format={tk} empty="No sales in this period." rows={bd.products.map((p) => ({ id: p.id, name: p.name, value: p.sales, note: `${fmt(p.qty)} ${p.sub}${see.profit ? ` · ${p.sales ? pct(p.profit / p.sales) : '0%'} margin` : ''}` }))} />
         </Card>
         <Card icon="users" title="Top dealers" sub={period.label}>
           <BarList format={tk} empty="No sales in this period." rows={bd.dealers.map((d) => ({ id: d.id, name: d.name, sub: d.sub, value: d.sales, note: `${fmt(d.invoices)} invoice${d.invoices === 1 ? '' : 's'}` }))} />
@@ -215,7 +219,7 @@ export default function SalesAnalyticsPage() {
             { label: 'Sold by', render: (f) => <span className="t-muted">{byId(db.employees, f.soldBy)?.name || 'Office'}</span> },
             { label: 'Items', render: (f) => <span className="t-muted">{f.lines.map((l) => `${fmt(l.qty)} ${l.unit}`).join(', ')}</span> },
             { label: 'Total', align: 'right', render: (f) => <b>{tk(f.total)}</b> },
-            { label: 'Profit', align: 'right', render: (f) => <span className={f.profit < 0 ? 't-warn' : ''}>{tk(f.profit)}</span> },
+            { label: 'Profit', align: 'right', render: (f) => (see.profit ? <span className={f.profit < 0 ? 't-warn' : ''}>{tk(f.profit)}</span> : <Hidden what="profit" />) },
             { label: 'Status', align: 'right', render: (f) => {
               const due = dueOf(f.id, f.dealerId)
               return due > 0 ? <Pill tone="warn">Due {tkShort(due)}</Pill> : <Pill tone="good">Paid</Pill>

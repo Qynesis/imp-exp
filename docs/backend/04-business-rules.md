@@ -397,7 +397,19 @@ Income − cost − expenses equals the P&L net for the same months; the tests c
 - Files are stored per company outside the books. The books keep `{ id, name, type, size }`.
 - Removing a file from a form deletes it. Detaching it from a saved payment keeps the stored copy for the audit trail.
 
-## 4.20 Sample data
+## 4.20 Special permissions, factories, suppliers and people
+
+- **Seeing prices:** `Role.see = { cost, profit }`, read with `canSee(db, userId, key)`.
+  - The Owner always sees both. A role without a setting follows its default: the Accountant sees both, others see neither.
+  - `cost` covers cost per unit, supplier and factory prices, stock value and landed cost. `profit` covers gross profit and margins.
+  - Today the screens and the AI assistant hide these figures, but the whole books still reach the browser.
+  - In the NestJS backend, the books projection and every v2 endpoint must leave out cost fields (`cost`, `rate` on purchases and factory orders, shipment money) and profit for roles without them. Hiding them in the UI alone is not enough.
+- **Recording purchases without cost access:** a role without `cost` records goods by quantity only. The purchase uses the item's current cost, on credit, and is refused when the item has no cost yet.
+- **Factories:** `saveFactory` checks the name is unique, ignoring case. `archiveFactory` takes a factory out of pickers while keeping its orders. `factoryRows` gives orders, open orders, pending quantity, billed, paid and the balance.
+- **Suppliers:** `supplyRows` gives, per supplier and item, the number of purchases, total quantity, and last, average, lowest and highest price.
+- **Employees:** `employeeProfile` gives six months of sales, bills, collections, commission, target, salary, advance, paid and due, plus their dealers and payments.
+
+## 4.21 Sample data
 
 Sample data lets people try the delivery and courier screens.
 
@@ -409,7 +421,7 @@ Sample data lets people try the delivery and courier screens.
   transaction.
 - Every report query adds `AND NOT sample`. The partial indexes in 02 §2.3 keep this cheap.
 
-## 4.21 Roles in commands
+## 4.22 Roles in commands
 
 The permission guard checks the page level before the service runs (05 §5.4). Services also enforce:
 

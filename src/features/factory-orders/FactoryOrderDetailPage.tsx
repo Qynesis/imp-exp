@@ -1,3 +1,4 @@
+import { useSee } from '@/app/useSee'
 import { byId, byDateTs, fdate, fmt, foCalc, tk, type FactoryReceipt, type FactoryBill } from '@shared/domain'
 import { CustomView } from '@/components/CustomFields'
 import { ClipButton } from '@/components/attachments/Attachments'
@@ -42,6 +43,7 @@ const balanceText = (b: number) => (b > 0 ? `Factory owes us ${tk(b)}` : b < 0 ?
 
 export function FactoryOrderDetailPage({ id }: { id: string }) {
   const { db } = useBooks()
+  const see = useSee()
   const sheets = useSheets()
   const print = usePrint()
   const o = byId(db.factoryOrders, id)
@@ -144,27 +146,29 @@ export function FactoryOrderDetailPage({ id }: { id: string }) {
       </div>
 
       <CustomView entity="factoryOrder" record={o} />
+      {see.cost ? (
       <Card icon="wallet" title="Payment history for this lot" sub="Each payment and each bill moves the balance, so it always shows who owes whom. Pay any amount, any time."
-        action={<div className="btn-row tight-row">
-          <Button size="sm" variant="secondary" icon="print" onClick={() => print(<OrderStatementDoc db={db} o={o} />)}>Print</Button>
-          <Button size="sm" variant="secondary" icon="send" onClick={() => shareOnWhatsApp(orderStatementText(db, o), c.factory?.phone)}>WhatsApp</Button>
-          <Button size="sm" icon="wallet" className="edit-only" onClick={() => sheets.open(PaySheet, { kind: 'factory', orderId: o.id, crumb: 'Factory order' })}>Add payment</Button>
-        </div>}>
-        <DataTable
-          rows={ledger}
-          rowClass={(r) => r.expected && 'expected-row'}
-          empty="No payments or bills yet."
-          columns={[
-            { label: 'Date', render: (r) => (r.expected ? 'Expected' : fdate(r.date)) },
-            { label: 'Entry', primary: true, render: (r) => r.entry },
-            { label: 'We paid', align: 'right', render: (r) => (r.paid ? tk(r.paid) : '') },
-            { label: 'Factory billed', align: 'right', render: (r) => (r.billed ? tk(r.billed) : '') },
-            { label: 'Balance after', align: 'right', render: (r) => <b className={r.bal > 0 ? 't-good' : r.bal < 0 ? 't-warn' : 't-muted'}>{r.expected && r.bal < 0 ? `We will owe ${tk(-r.bal)}` : balanceText(r.bal)}</b> },
-
-            { label: '', align: 'right', render: (r) => { const pay = o.payments.find((p) => p.id === r.id); return pay ? <ClipButton target="factoryPayment" id={pay.id} files={pay.attachments || []} title={`${o.id} payment`} /> : '' } },
-          ]}
-        />
-      </Card>
+          action={<div className="btn-row tight-row">
+            <Button size="sm" variant="secondary" icon="print" onClick={() => print(<OrderStatementDoc db={db} o={o} />)}>Print</Button>
+            <Button size="sm" variant="secondary" icon="send" onClick={() => shareOnWhatsApp(orderStatementText(db, o), c.factory?.phone)}>WhatsApp</Button>
+            <Button size="sm" icon="wallet" className="edit-only" onClick={() => sheets.open(PaySheet, { kind: 'factory', orderId: o.id, crumb: 'Factory order' })}>Add payment</Button>
+          </div>}>
+          <DataTable
+            rows={ledger}
+            rowClass={(r) => r.expected && 'expected-row'}
+            empty="No payments or bills yet."
+            columns={[
+              { label: 'Date', render: (r) => (r.expected ? 'Expected' : fdate(r.date)) },
+              { label: 'Entry', primary: true, render: (r) => r.entry },
+              { label: 'We paid', align: 'right', render: (r) => (r.paid ? tk(r.paid) : '') },
+              { label: 'Factory billed', align: 'right', render: (r) => (r.billed ? tk(r.billed) : '') },
+              { label: 'Balance after', align: 'right', render: (r) => <b className={r.bal > 0 ? 't-good' : r.bal < 0 ? 't-warn' : 't-muted'}>{r.expected && r.bal < 0 ? `We will owe ${tk(-r.bal)}` : balanceText(r.bal)}</b> },
+  
+              { label: '', align: 'right', render: (r) => { const pay = o.payments.find((p) => p.id === r.id); return pay ? <ClipButton target="factoryPayment" id={pay.id} files={pay.attachments || []} title={`${o.id} payment`} /> : '' } },
+            ]}
+          />
+        </Card>
+      ) : <Card icon="wallet" title="Payment history for this lot"><Empty>Payments, bills and factory prices are hidden for your role.</Empty></Card>}
     </>
   )
 }

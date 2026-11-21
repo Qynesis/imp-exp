@@ -2,7 +2,8 @@ import { byId, fmt, foCalc, num, todayISO, tk, tripCalc, trips } from '@shared/d
 import { MethodSelect } from '@/components/MethodSelect'
 import { ScanBox } from '@/components/barcode/ScanBox'
 import { useBooks } from '@/core/store/context'
-import { Field, FormSheet, Segmented, useForm, useToast } from '@/ui'
+import { LabelsSheet } from '@/features/products/sheets/LabelsSheet'
+import { Field, FormSheet, Segmented, useForm, useSheets, useToast } from '@/ui'
 
 type FreightMode = 'none' | 'in' | 'out'
 
@@ -13,8 +14,9 @@ type FreightMode = 'none' | 'in' | 'out'
  */
 export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
   const { db, act } = useBooks()
+  const sheets = useSheets()
   const toast = useToast()
-  const [v, set, bind, nbind] = useForm({ date: todayISO(), challan: '', qty: '', damaged: '', note: '', freightMode: 'none' as FreightMode, freight: '', method: 'Cash' })
+  const [v, set, bind, nbind] = useForm({ date: todayISO(), challan: '', qty: '', damaged: '', note: '', freightMode: 'none' as FreightMode, freight: '', method: 'Cash', labels: '' })
   const o = byId(db.factoryOrders, orderId)
   if (!o) return null
   const c = foCalc(db, o)
@@ -34,6 +36,11 @@ export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
         if (qty > c.pending) return `Only ${fmt(c.pending)} ${c.unit} are still pending on this order. Change the order first if the factory sent more.`
         if (v.freightMode !== 'none' && freight <= 0) return 'Enter the freight paid, or choose No freight.'
         act('receiveShipment', { orderId, date: v.date, challan: v.challan.trim(), qty, damaged: num(v.damaged), note: v.note.trim(), freight, freightInCost: v.freightMode === 'in', method: v.method })
+        if (v.labels === 'yes') {
+          const p = db.products.find((x) => x.id === o.productId)
+          const cartons = p?.perCarton ? Math.ceil(qty / p.perCarton) : 0
+          sheets.open(LabelsSheet, { preset: [{ productId: o.productId, count: cartons || Math.ceil(qty), kind: cartons ? 'carton' : 'unit' }] })
+        }
         toast(`${fmt(qty)} ${c.unit} added to stock${freight ? ` · freight ${tk(freight)} saved` : ''}`)
       }}>
       <div className="wide-note">
@@ -69,6 +76,7 @@ export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
         </>
       )}
       <Field label="Note" wide><input {...bind('note')} placeholder="Optional" /></Field>
+      <label className="check wide-note"><input type="checkbox" checked={v.labels === 'yes'} onChange={(e) => set('labels', e.target.checked ? 'yes' : '')} /> Print barcode labels for these goods after saving</label>
     </FormSheet>
   )
 }

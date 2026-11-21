@@ -1,4 +1,4 @@
-import { activeProducts, byId, fmt, materialsFor, num, tk, todayISO, type CustomValues, type MaterialGiven } from '@shared/domain'
+import { activeProducts, byId, fmt, materialsFor, num, tk, todayISO, type CustomValues, type MaterialGiven, activeFactories } from '@shared/domain'
 import { CustomFields } from '@/components/CustomFields'
 import { MethodSelect } from '@/components/MethodSelect'
 import { go } from '@/core/router'
@@ -18,10 +18,12 @@ interface Props {
   mode?: 'order' | 'estimate'
   /** Edit this estimate (mode 'estimate'), or confirm it as an order (mode 'order'). */
   estimateId?: string
+  /** Start with this factory. */
+  factoryId?: string
 }
 
 /** Place an order with a factory, or prepare the estimate that goes to the factory for approval first. */
-export function NewFactoryOrderSheet({ productId, mode = 'order', estimateId }: Props) {
+export function NewFactoryOrderSheet({ productId, mode = 'order', estimateId, factoryId }: Props) {
   const { db, act } = useBooks()
   const toast = useToast()
   const sheets = useSheets()
@@ -31,7 +33,7 @@ export function NewFactoryOrderSheet({ productId, mode = 'order', estimateId }: 
   const confirming = !estimating && !!est
   const [v, set, bind, nbind] = useForm(() => ({
     // the factory that made this item last time, when known
-    factoryId: est?.factoryId || db.factoryOrders.find((o) => o.productId === preset?.id)?.factoryId || db.factories[0]?.id || '',
+    factoryId: factoryId || est?.factoryId || db.factoryOrders.find((o) => o.productId === preset?.id)?.factoryId || activeFactories(db)[0]?.id || '',
     type: (est ? String(est.type) : preset && preset.kind !== 'finished' ? '2' : '1') as '1' | '2',
     productId: preset?.id || activeProducts(db).find((p) => p.kind === 'finished')?.id || activeProducts(db)[0]?.id || '',
     qty: est ? String(est.qty) : '', rate: est ? String(est.rate) : '', expected: est?.wanted || '', validUntil: est?.validUntil || '', note: est?.note || '',
@@ -91,8 +93,8 @@ export function NewFactoryOrderSheet({ productId, mode = 'order', estimateId }: 
         : 'Type 1: we hand over raw materials and pay only a making charge. Type 2: the factory uses its own materials and bills the full price. An advance is optional.'}>
       <Field label="Factory" hint={<button type="button" className="link" onClick={() => sheets.open(AddFactorySheet)}>Add a new factory</button>}>
         <select {...bind('factoryId')}>
-          {!db.factories.length && <option value="">No factories yet</option>}
-          {db.factories.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          {!activeFactories(db, v.factoryId).length && <option value="">No factories yet</option>}
+          {activeFactories(db, v.factoryId).map((f) => <option key={f.id} value={f.id}>{f.name}{f.makes ? ` · ${f.makes}` : ''}</option>)}
         </select>
       </Field>
       <Field label="Order type">

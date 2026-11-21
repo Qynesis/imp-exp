@@ -1,3 +1,4 @@
+import { useSee } from '@/app/useSee'
 import {
   addDays, byId, change, fday, flong, fmt, foCalc, fshort, IMPORT_STAGES, isLowStock, orderBook, paperAlerts, PAPERS, payables, plural, receivables,
   servicesDue, tk, tkShort, todayISO, totalsBetween, tradeOverview, type ImportStage, type PipelineRow,
@@ -20,6 +21,7 @@ const pct = (x: number) => `${Math.round(x * 100)}%`
 
 export default function DashboardPage() {
   const { db } = useBooks()
+  const see = useSee()
   const sheets = useSheets()
   const { level } = useAccess()
   const today = todayISO()
@@ -47,7 +49,7 @@ export default function DashboardPage() {
         <Stat href={salesTo} icon="receipt" label="Sales today" value={tk(book.today.value)}
           sub={<>{plural(book.today.orders, 'order')}{vsYesterday != null && <> · <b className={vsYesterday >= 0 ? 't-good' : 't-warn'}>{vsYesterday >= 0 ? '↑' : '↓'} {pct(Math.abs(vsYesterday))}</b> vs yesterday</>}</>} />
         <Stat href={salesTo} icon="trend" label="Orders this month" value={tk(book.month.value)}
-          sub={`${plural(book.month.orders, 'order')}${book.target ? ` · ${pct(book.month.value / book.target)} of target` : ''} · profit ${tkShort(book.month.profit)}`} />
+          sub={`${plural(book.month.orders, 'order')}${book.target ? ` · ${pct(book.month.value / book.target)} of target` : ''}${see.profit ? ` · profit ${tkShort(book.month.profit)}` : ''}`} />
         <Stat href={link('cashbook')} icon="arrowIn" label="Owed to us (dealers)" value={tk(rec.total)} tone={rec.total > 0 ? 'good' : undefined} sub={rec.rows.length ? `${plural(rec.rows.length, 'dealer')}, ${rec.rows.filter((r) => r.overdue).length} overdue` : 'No dues'} />
         <Stat href={link('cashbook')} icon="arrowOut" label="We owe" value={tk(pay.total)} tone={pay.total > 0 ? 'warn' : undefined} sub={pay.rows.length ? `${plural(pay.rows.length, 'bill')} · suppliers, factories, transport` : 'Nothing to pay'} />
       </div>
@@ -211,19 +213,20 @@ function Attention() {
 /** Sales of the last fourteen days, with a way into the full analytics. */
 function RecentSales() {
   const { db } = useBooks()
+  const see = useSee()
   const { level } = useAccess()
   const today = todayISO()
   const days = Array.from({ length: 14 }, (_, i) => addDays(today, i - 13))
   const data = days.map((d) => {
     const t = totalsBetween(db, d, d)
-    return { key: d, short: String(Number(d.slice(8))), long: fday(d), value: t.sales, line: t.profit, extra: [['orders', fmt(t.invoices)] as [string, string]] }
+    return { key: d, short: String(Number(d.slice(8))), long: fday(d), value: t.sales, line: see.profit ? t.profit : null, extra: [['orders', fmt(t.invoices)] as [string, string]] }
   })
   const total = data.reduce((s, d) => s + d.value, 0)
   const orders = days.reduce((s, d) => s + totalsBetween(db, d, d).invoices, 0)
   return (
     <Card icon="trend" title="Sales orders, last 14 days" sub={`${tkShort(total)} from ${plural(orders, 'order')}`}
       action={level('sales-analytics') !== 'none' ? <button type="button" className="link" onClick={() => go('sales-analytics')}>Open sales analytics</button> : undefined}>
-      <ColumnChart data={data} valueName="Sales" lineName="Gross profit" format={tk} height={210} />
+      <ColumnChart data={data} valueName="Sales" lineName={see.profit ? 'Gross profit' : undefined} format={tk} height={210} />
     </Card>
   )
 }
