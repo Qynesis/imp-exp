@@ -19,7 +19,8 @@ import { localAnswer } from '../assistant/local'
 import { applyBusinessTypes, isBusinessType } from '../domain/catalog'
 import { MESSAGING_FIELDS, MessagingError, sendMessage, type MessagingKeys } from '../messaging'
 import { bookParcel, COURIER_PROVIDERS, courierAreas, courierBalance, CourierError, FIELDS, parcelStatus, testCourier, trackParcel, type BookRequest, type CourierKeys } from '../courier'
-import { isAdmin, OWNER_ROLE_ID } from '../domain/permissions'
+import { defaultRoles, isAdmin, OWNER_ROLE_ID } from '../domain/permissions'
+import { applyAction } from '../domain/actions'
 import { demoDb, emptyDb } from '../domain/seed'
 import { isDb, type CourierProvider, type Db, type MessageChannel } from '../domain/types'
 import type { BillingView, CompanySummary, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
@@ -145,11 +146,13 @@ const bad = (message: string) => new ApiFailure(400, message)
 /* ---------- helpers ---------- */
 const SESSION_MS = 30 * 86400000
 const PLATFORM_OPEN_MS = 4 * 3600000
+/** [user id, name, email, role, linked employee] */
 export const DEMO_USERS = [
-  ['u1', 'Demo Owner', 'owner@demo.com', 'owner'],
-  ['u2', 'Demo Accountant', 'accountant@demo.com', 'accountant'],
-  ['u3', 'Demo Sales', 'sales@demo.com', 'sales'],
-  ['u4', 'Demo Warehouse', 'warehouse@demo.com', 'warehouse'],
+  ['u1', 'Demo Owner', 'owner@demo.com', 'owner', ''],
+  ['u2', 'Demo Accountant', 'accountant@demo.com', 'accountant', 'e1'],
+  ['u3', 'Demo Sales', 'sales@demo.com', 'sales', 'e4'],
+  ['u4', 'Demo Warehouse', 'warehouse@demo.com', 'warehouse', 'e2'],
+  ['u5', 'Rina Akter', 'employee@demo.com', 'staff', 'e5'],
 ] as const
 const DEMO_TENANT = 'demo'
 
@@ -194,11 +197,26 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       if (!(await store.get('books:' + DEMO_TENANT))) {
         const db = demoDb()
         db.company.name = 'Star Bangla Demo'
-        db.company.logo = '/brand-logo.png'
+        db.company.logo = '/brand-logo.png' // the demo customer's own logo
         applyBusinessTypes(db, ['general', 'electronics', 'medical'])
-        db.users = DEMO_USERS.map(([id, name, email, roleId]) => ({ id, name, email, roleId, employeeId: '' }))
+        db.users = DEMO_USERS.map(([id, name, email, roleId, employeeId]) => ({ id, name, email, roleId, employeeId }))
         await store.set('books:' + DEMO_TENANT, { version: 1, db } satisfies TenantBooks)
         await store.set('tenant:' + DEMO_TENANT, { name: db.company.name, createdAt: new Date().toISOString() } satisfies TenantInfo)
+      } else {
+        // demo books made by an older version: add the employee login and its role
+        const books = await store.get<TenantBooks>('books:' + DEMO_TENANT)
+        if (books && !books.db.users.some((u) => u.id === 'u5')) {
+          const staff = defaultRoles().find((r) => r.id === 'staff')
+          if (staff && !books.db.roles.some((r) => r.id === 'staff')) books.db.roles.push(staff)
+          for (const [id, name, email, roleId, employeeId] of DEMO_USERS) {
+            const u = books.db.users.find((x) => x.id === id)
+            const linked = books.db.employees.some((e) => e.id === employeeId) ? employeeId : ''
+            if (!u) books.db.users.push({ id, name, email, roleId, employeeId: linked })
+            else if (!u.employeeId) u.employeeId = linked
+          }
+          books.version++
+          await store.set('books:' + DEMO_TENANT, books)
+        }
       }
       for (const [userId, , email] of DEMO_USERS) {
         const acc = await store.get<Account>('account:' + email)
@@ -343,7 +361,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
   /* ----- routes ----- */
   const routes: Record<string, Handler> = {
     'GET status': async (): Promise<StatusResponse> => {
-      const logins: DemoLogin[] = DEMO_USERS.map(([, name, email, roleId]) => ({ name, email, role: roleId[0].toUpperCase() + roleId.slice(1) }))
+      const logins: DemoLogin[] = DEMO_USERS.map(([, name, email, roleId]) => ({ name, email, role: roleId === 'staff' ? 'Employee' : roleId[0].toUpperCase() + roleId.slice(1) }))
       if (opts.listPlatformInDemo) logins.push({ name: 'Platform owner', email: PLATFORM, role: 'Platform owner' })
       return {
         ok: store.ok,
@@ -744,8 +762,11 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       needPassword(str(b.password))
       if (!db.roles.some((r) => r.id === roleId)) throw bad('Choose a role.')
       if (await emailTaken(email)) throw new ApiFailure(409, 'That email already has an account.')
+      const employeeId = str(b.employeeId)
+      if (employeeId && !db.employees.some((e) => e.id === employeeId)) throw bad('That employee is not in the books.')
+      if (employeeId && db.users.some((u) => u.employeeId === employeeId)) throw new ApiFailure(409, 'That employee already has a login.')
       const id = 'u' + ++db.seq.id
-      db.users.push({ id, name, email, roleId, employeeId: str(b.employeeId) })
+      db.users.push({ id, name, email, roleId, employeeId })
       await saveBooks(ctx)
       const salt = kit.randomHex(16)
       await store.set('account:' + email, { tenantId: ctx.acc.tenantId, userId: id, salt, hash: await kit.hashPassword(str(b.password), salt) } satisfies Account)
@@ -766,6 +787,12 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
         if (user.roleId === OWNER_ROLE_ID && roleId !== OWNER_ROLE_ID && db.users.filter((u) => u.roleId === OWNER_ROLE_ID).length === 1) throw bad('There must be at least one Owner.')
         user.roleId = roleId
       }
+      if (typeof b.employeeId === 'string') {
+        const employeeId = b.employeeId
+        if (employeeId && !db.employees.some((e) => e.id === employeeId)) throw bad('That employee is not in the books.')
+        if (employeeId && db.users.some((u) => u.id !== user.id && u.employeeId === employeeId)) throw new ApiFailure(409, 'That employee already has a login.')
+        user.employeeId = employeeId
+      }
       const pw = str(b.password)
       if (pw) {
         needPassword(pw)
@@ -779,6 +806,66 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       }
       await saveBooks(ctx)
       return { db, version: ctx.tenant.version }
+    },
+
+    /**
+     * An employee asks for leave or withdraws a request, for themselves only. Works for every role,
+     * even one that cannot change the books, because it touches nothing but their own request.
+     */
+    'POST leave': async (req) => {
+      const ctx = await auth(req)
+      await needActive(ctx)
+      const b = obj(req.body)
+      const me = ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)
+      const employeeId = me?.employeeId || ''
+      if (!employeeId || !ctx.tenant.db.employees.some((e) => e.id === employeeId)) throw new ApiFailure(403, 'Your login is not linked to an employee.')
+      const at = new Date().toISOString()
+      const run = (fn: () => Db) => {
+        try { return fn() } catch (e) { throw bad((e as Error).message) }
+      }
+      if (str(b.op) === 'cancel') {
+        ctx.tenant.db = run(() => applyAction(ctx.tenant.db, 'cancelLeave', { id: str(b.id), employeeId, today: at.slice(0, 10) }))
+      } else {
+        const kind = str(b.kind)
+        if (!['casual', 'sick', 'annual', 'unpaid', 'other'].includes(kind)) throw bad('Choose the kind of leave.')
+        ctx.tenant.db = run(() => applyAction(ctx.tenant.db, 'requestLeave', {
+          employeeId, kind: kind as 'casual', from: str(b.from).slice(0, 10), to: str(b.to).slice(0, 10), half: b.half === true, reason: str(b.reason).slice(0, 500), by: me?.name || ctx.email, at,
+        }))
+      }
+      await saveBooks(ctx)
+      return { db: ctx.tenant.db, version: ctx.tenant.version }
+    },
+
+    /**
+     * The signed-in employee checks in or out. The time is the server's, shown in the person's own
+     * time zone, so nobody can check in for an earlier hour by changing the phone's clock.
+     */
+    'POST attendance': async (req) => {
+      const ctx = await auth(req)
+      await needActive(ctx)
+      const b = obj(req.body)
+      const me = ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)
+      const employeeId = me?.employeeId || ''
+      if (!employeeId || !ctx.tenant.db.employees.some((e) => e.id === employeeId)) throw new ApiFailure(403, 'Your login is not linked to an employee.')
+      const tz = Number(b.tz)
+      if (!Number.isFinite(tz) || tz < -840 || tz > 720) throw bad('Your device did not send its time zone.')
+      const local = new Date(Date.now() - tz * 60000).toISOString()
+      const date = local.slice(0, 10)
+      const time = local.slice(11, 16)
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+      const lat = num(b.lat)
+      const lng = num(b.lng)
+      const ok = lat != null && lng != null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+      const run = (fn: () => Db) => {
+        try { return fn() } catch (e) { throw bad((e as Error).message) }
+      }
+      if (str(b.op) === 'out') {
+        ctx.tenant.db = run(() => applyAction(ctx.tenant.db, 'checkOut', { employeeId, date, time, work: str(b.work).slice(0, 300), output: num(b.output) }))
+      } else {
+        ctx.tenant.db = run(() => applyAction(ctx.tenant.db, 'checkIn', { employeeId, date, time, lat: ok ? lat : undefined, lng: ok ? lng : undefined }))
+      }
+      await saveBooks(ctx)
+      return { db: ctx.tenant.db, version: ctx.tenant.version }
     },
 
     'DELETE users': async (req) => {

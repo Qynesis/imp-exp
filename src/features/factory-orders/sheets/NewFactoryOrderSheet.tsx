@@ -1,4 +1,4 @@
-import { activeProducts, byId, fmt, materialsFor, num, tk, todayISO, type CustomValues, type MaterialGiven, activeFactories } from '@shared/domain'
+import { activeProducts, byId, fmt, materialsFor, num, tk, todayISO, type CustomValues, type MaterialGiven, activeFactories, fullAddress } from '@shared/domain'
 import { CustomFields } from '@/components/CustomFields'
 import { MethodSelect } from '@/components/MethodSelect'
 import { go } from '@/core/router'
@@ -33,7 +33,7 @@ export function NewFactoryOrderSheet({ productId, mode = 'order', estimateId, fa
   const confirming = !estimating && !!est
   const [v, set, bind, nbind] = useForm(() => ({
     // the factory that made this item last time, when known
-    factoryId: factoryId || est?.factoryId || db.factoryOrders.find((o) => o.productId === preset?.id)?.factoryId || activeFactories(db)[0]?.id || '',
+    factoryId: factoryId || est?.factoryId || preset?.factoryIds?.find((id) => activeFactories(db).some((f) => f.id === id)) || db.factoryOrders.find((o) => o.productId === preset?.id)?.factoryId || activeFactories(db)[0]?.id || '',
     type: (est ? String(est.type) : preset && preset.kind !== 'finished' ? '2' : '1') as '1' | '2',
     productId: preset?.id || activeProducts(db).find((p) => p.kind === 'finished')?.id || activeProducts(db)[0]?.id || '',
     qty: est ? String(est.qty) : '', rate: est ? String(est.rate) : '', expected: est?.wanted || '', validUntil: est?.validUntil || '', note: est?.note || '',
@@ -91,10 +91,10 @@ export function NewFactoryOrderSheet({ productId, mode = 'order', estimateId, fa
         ? 'An estimate is a proposal. Print it or send it on WhatsApp; once the factory approves, confirm it as an order. Nothing moves in stock or money until then.'
         : confirming ? 'Check the approved quantity and rate. An advance is optional: pay any amount now, later, or in parts.'
         : 'Type 1: we hand over raw materials and pay only a making charge. Type 2: the factory uses its own materials and bills the full price. An advance is optional.'}>
-      <Field label="Factory" hint={<button type="button" className="link" onClick={() => sheets.open(AddFactorySheet)}>Add a new factory</button>}>
+      <Field label="Factory" hint={<>{(() => { const x = byId(db.factories, v.factoryId); const line = x ? [fullAddress(x), x.phone].filter(Boolean).join(' · ') : ''; return line ? <>{line}<br /></> : null })()}<button type="button" className="link" onClick={() => sheets.open(AddFactorySheet, {})}>Add a new factory</button></>}>
         <select {...bind('factoryId')}>
           {!activeFactories(db, v.factoryId).length && <option value="">No factories yet</option>}
-          {activeFactories(db, v.factoryId).map((f) => <option key={f.id} value={f.id}>{f.name}{f.makes ? ` · ${f.makes}` : ''}</option>)}
+          {activeFactories(db, v.factoryId).map((f) => <option key={f.id} value={f.id}>{f.name}{f.city || f.area ? ` · ${f.city || f.area}` : ''}{f.makes ? ` · ${f.makes}` : ''}</option>)}
         </select>
       </Field>
       <Field label="Order type">

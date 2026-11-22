@@ -18,7 +18,7 @@ import { tradeOverview } from './trade'
 import { paperAlerts, servicesDue } from './transport'
 
 export type NoticeTone = 'warn' | 'info' | 'good'
-export type NoticeKind = 'money' | 'stock' | 'delivery' | 'trade' | 'factory' | 'transport' | 'sales' | 'accounts' | 'messages'
+export type NoticeKind = 'money' | 'stock' | 'delivery' | 'trade' | 'factory' | 'transport' | 'sales' | 'accounts' | 'messages' | 'people'
 export interface Notice {
   id: string
   kind: NoticeKind
@@ -32,11 +32,13 @@ export interface Notice {
   date: ISODate
   /** Higher comes first. */
   rank: number
+  /** Only for the person linked to this employee (e.g. the answer to their leave request). */
+  forEmployee?: string
 }
 
 export const NOTICE_KINDS: Record<NoticeKind, string> = {
   money: 'Dues and payments', stock: 'Stock', delivery: 'Delivery', trade: 'Imports and exports', factory: 'Factory orders',
-  transport: 'Transport', sales: 'Sales', accounts: 'Accounts', messages: 'Messages',
+  transport: 'Transport', sales: 'Sales', accounts: 'Accounts', messages: 'Messages', people: 'Staff and leave',
 }
 
 export const notifications = (db: Db, today: ISODate = todayISO()): Notice[] =>
@@ -164,5 +166,30 @@ export const notifications = (db: Db, today: ISODate = todayISO()): Notice[] =>
         title: `${failed.length} message${failed.length === 1 ? '' : 's'} failed to send`, body: failed[0].error || 'Check the number or the SMS/WhatsApp settings.' })
     }
 
+    // leave: requests waiting for the admin, and answers for the person who asked
+    const name = (id: string) => db.employees.find((e) => e.id === id)?.name || 'Someone'
+    const span = (r: { from: string; to: string; half?: boolean }) => (r.half ? `half day on ${fdate(r.from)}` : r.from === r.to ? fdate(r.from) : `${fdate(r.from)} to ${fdate(r.to)}`)
+    for (const r of db.leaveRequests || []) {
+      if (r.status === 'pending') {
+        add({ id: 'leave:ask:' + r.id, kind: 'people', tone: r.from <= addDays(today, 2) ? 'warn' : 'info', rank: 60, page: 'employees', to: 'employees/leave', date: r.askedAt.slice(0, 10),
+          title: `${name(r.employeeId)} asks for leave`, body: `${span(r)} · ${r.reason}` })
+      } else if ((r.status === 'approved' || r.status === 'declined') && r.decidedAt && daysBetween(r.decidedAt.slice(0, 10), today) <= 14) {
+        add({ id: `leave:${r.status}:${r.id}`, kind: 'people', tone: r.status === 'approved' ? 'good' : 'warn', rank: 55, page: 'my-work', to: 'my-work', date: r.decidedAt.slice(0, 10), forEmployee: r.employeeId,
+          title: r.status === 'approved' ? 'Your leave is approved' : 'Your leave was declined', body: `${span(r)}${r.answer ? ` · ${r.answer}` : ''}` })
+      }
+    }
+    // transfers: the person hears of their move; the office is reminded as the day comes
+    for (const t of db.staffTransfers || []) {
+      if (t.cancelled) continue
+      const to = (db.workplaces || []).find((w) => w.id === t.to)?.name || 'a new place'
+      if (t.date >= today || daysBetween(t.at.slice(0, 10), today) <= 7) {
+        add({ id: 'transfer:me:' + t.id, kind: 'people', tone: 'info', rank: 58, page: 'my-work', to: 'my-work', date: t.at.slice(0, 10), forEmployee: t.employeeId,
+          title: t.date > today ? `You are transferred to ${to}` : `You now work at ${to}`, body: `From ${fdate(t.date)}${t.orderNo ? ` · order ${t.orderNo}` : ''} · ${t.reason}` })
+      }
+      if (t.date >= today && daysBetween(today, t.date) <= 3) {
+        add({ id: 'transfer:due:' + t.id, kind: 'people', tone: 'info', rank: 40, page: 'employees', to: 'employees/places', date: today,
+          title: `${name(t.employeeId)} moves to ${to}`, body: t.date === today ? 'Starts there today' : `Starts there on ${fdate(t.date)}` })
+      }
+    }
     return out.sort((a, b) => b.rank - a.rank)
   })

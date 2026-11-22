@@ -120,7 +120,7 @@ function HeroMockup() {
     <motion.div ref={ref} className="ld-mock-wrap" onPointerMove={move} onPointerLeave={() => { mx.set(0); my.set(0) }}
       initial={{ opacity: 0, y: 60, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 1, delay: 0.35, ease }}>
       <motion.div className="ld-mock" style={{ rotateX: rx, rotateY: ry }}>
-        <div className="ld-mock-bar"><i /><i /><i /><span>{BRAND}</span></div>
+        <div className="ld-mock-bar"><i /><i /><i /><span>{BRAND} · Star Bangla Demo</span></div>
         <div className="ld-mock-body">
           <div className="ld-mock-tiles">
             {tiles.map(([icon, label, value], i) => (
@@ -226,7 +226,7 @@ function Hero() {
             <a className="ld-btn ld-btn-ghost" href="#/signin">Try the demo</a>
           </motion.div>
           <motion.ul className="ld-trust" initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: 0.08, delayChildren: 1.1 } } }}>
-            {['bKash · Nagad · Card', 'BD VAT and BIN ready', 'English and বাংলা', 'No setup fee'].map((t) => (
+            {['Each company’s books kept apart', 'bKash · Nagad · Card', 'BD VAT and BIN ready', 'English and বাংলা'].map((t) => (
               <motion.li key={t} variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}><Icon name="check" size={15} /> {t}</motion.li>
             ))}
           </motion.ul>

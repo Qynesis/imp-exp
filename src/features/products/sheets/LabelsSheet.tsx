@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { categoryPath, fmt, inCategory, productBarcode, tk, type Product } from '@shared/domain'
 import { Barcode } from '@/components/barcode/Barcode'
 import { useBooks } from '@/core/store/context'
-import { Button, cls, Field, Segmented, Sheet, usePrint, useToast, type SheetComponent } from '@/ui'
+import { Button, cls, Field, Segmented, Sheet, usePrint, useToast, type SheetComponent, SearchBox } from '@/ui'
 
 export type LabelSize = 'a4-21' | 'a4-40' | 'roll'
 const SIZES: Record<LabelSize, string> = {
@@ -110,7 +110,7 @@ export const LabelsSheet: SheetComponent<{ productIds?: string[]; preset?: Label
           <option value="">All suppliers</option>
           {db.suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
-        <input className="in grow" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Scan or search name, code, barcode" aria-label="Search items" />
+        <SearchBox value={q} onChange={setQ} placeholder="Scan or search name, code, barcode" label="Search items" />
       </div>
 
       <div className="labels-bulk">

@@ -8,7 +8,7 @@ import { PageHead } from '@/components/PageHead'
 import { go } from '@/core/router'
 import { accessGuard, useBooks } from '@/core/store/context'
 import { AddExpenseSheet } from '@/features/cashbook/sheets/AddExpenseSheet'
-import { Button, Card, cls, DataTable, Pill, Segmented, Stat, useSheets } from '@/ui'
+import { Button, Card, cls, DataTable, Pill, Segmented, Stat, useSheets, SearchBox } from '@/ui'
 import { AccountHeadSheet } from './sheets/AccountHeadSheet'
 import { ExpenseAccountDetailSheet } from './sheets/ExpenseAccountDetailSheet'
 import { ExpenseAccountSheet } from './sheets/ExpenseAccountSheet'
@@ -70,17 +70,19 @@ function Ledger() {
   const [custom, setCustom] = useState<[ISODate, ISODate]>([thisMonth() + '-01', todayISO()])
   const [head, setHead] = useState('')
   const [kind, setKind] = useState<'all' | 'one-time' | 'regular'>('all')
+  const [q, setQ] = useState('')
   const [from, to] = rangeOf(range, custom)
   const all = expenseRows(db, from, to)
   const heads = new Map<string, number>()
   for (const r of all) heads.set(r.head, (heads.get(r.head) || 0) + r.amount)
-  const rows = all.filter((r) => (!head || r.head === head) && (kind === 'all' || r.kind === kind))
+  const n = q.trim().toLowerCase()
+  const rows = all.filter((r) => (!head || r.head === head) && (kind === 'all' || r.kind === kind) && (!n || `${r.details} ${r.head} ${r.method || ''}`.toLowerCase().includes(n)))
   const expenseById = new Map(db.expenses.map((e) => [e.id, e]))
   const months = Array.from({ length: 12 }, (_, i) => addMonths(thisMonth(), -i))
   return (
     <div className="stack">
       <Card icon="receipt" title={head ? `${head}: every entry` : 'Every expense'} sub={`${fdate(from)} to ${fdate(to)} · ${rows.length} entr${rows.length === 1 ? 'y' : 'ies'} · ${tk(sum(rows, (r) => r.amount))}`}
-        action={<Segmented<typeof kind> label="Kind" value={kind} onChange={setKind} options={[{ value: 'all', label: 'All' }, { value: 'one-time', label: 'One-time' }, { value: 'regular', label: 'Regular' }]} />}>
+        action={<div className="tools-right"><Segmented<typeof kind> label="Kind" value={kind} onChange={setKind} options={[{ value: 'all', label: 'All' }, { value: 'one-time', label: 'One-time' }, { value: 'regular', label: 'Regular' }]} /><SearchBox value={q} onChange={setQ} placeholder="Details or head" label="Search expenses" /></div>}>
         <div className="card-body pt0 stack-sm">
           <div className="chips">
             {(['month', 'last', 'year', 'custom'] as Range[]).map((r) => (

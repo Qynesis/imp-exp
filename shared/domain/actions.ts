@@ -11,13 +11,17 @@ import { addSampleDelivery, hasSampleDelivery, removeSampleDelivery } from './sa
 import { computeShipment } from './calc/shipments'
 import { depreciationDue } from './calc/assets'
 import { accountOf } from './calc/cashbook'
-import { tk } from './format'
+import { qtyAt, siteStock } from './calc/warehouse'
+import { datesBetween, LEAVE_KINDS } from './calc/payroll'
+import { postingOf } from './calc/postings'
+import { atSite, hoursOf } from './calc/attendance'
+import { fmt, tk, todayISO } from './format'
 import { countryByCode } from './countries'
 import { investorRows, profitPool, splitProfit } from './calc/investors'
 import type {
   Advance, BusinessTypeId, Category, Collection, Company, CustomsInfo, CustomsStage, Dealer, Db, Direction, Employee, Expense, Factory,
   FactoryOrderType, FieldDef, ISODate, Invoice, Delivery, FactoryEstimate, MaterialGiven, MessageLog, MessagingSettings, SalesQuote, SalesReturn, MaterialSettlement, Parcel, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
-  CustomValues, Role, FixedAsset, Investor, InvestorTxnKind, Attachment, ChangeArea, ChangeNote, Currency, ExpenseAccount, ExpenseEntry, TaxKind, TaxPayment, TaxRate, AccountHead, AttachTarget,
+  CustomValues, JobEvent, LeaveRequest, WorkPlace, Role, WarehouseSite, WorkDay, FixedAsset, Investor, InvestorTxnKind, Attachment, ChangeArea, ChangeNote, Currency, ExpenseAccount, ExpenseEntry, TaxKind, TaxPayment, TaxRate, AccountHead, AttachTarget,
 } from './types'
 
 const tick = (d: Db) => ++d.seq.ts
@@ -132,11 +136,11 @@ export const actions = {
     const name = p.name.trim()
     if (!name) throw new Error('Enter the factory name')
     if (d.factories.some((f) => f.id !== p.id && f.name.toLowerCase() === name.toLowerCase())) throw new Error('There is already a factory with that name')
-    const cur = byId(d.factories, p.id)
-    if (cur) {
-      const { id: _id, ...rest } = p
-      Object.assign(cur, { ...rest, name })
-    } else d.factories.push({ ...p, name, id: uid(d, 'f') })
+    const { id, ...rest } = p
+    const at = d.factories.findIndex((x) => x.id === id)
+    // replace the whole record, so details cleared in the form are cleared here too
+    if (at >= 0) d.factories[at] = { ...rest, name, id: d.factories[at].id }
+    else d.factories.push({ ...rest, name, id: uid(d, 'f') })
   },
   /** Stop using a factory: it leaves the pickers, its orders and history stay. */
   archiveFactory(d: Db, p: { id: string; archived: boolean }) {
@@ -208,11 +212,11 @@ export const actions = {
    * it is part of the product's cost, the cost per unit becomes the average of what was in stock and
    * this shipment at its order rate plus freight.
    */
-  receiveShipment(d: Db, p: { orderId: string; date: ISODate; challan: string; qty: number; damaged: number; note: string; freight?: number; freightInCost?: boolean; method?: string }) {
+  receiveShipment(d: Db, p: { orderId: string; date: ISODate; challan: string; qty: number; damaged: number; note: string; freight?: number; freightInCost?: boolean; method?: string; siteId?: string }) {
     const o = mustFind(d.factoryOrders, p.orderId, 'Factory order')
     const id = uid(d, 'fr')
     const freight = p.freight && p.freight > 0 ? p.freight : 0
-    o.receipts.push({ id, ts: tick(d), date: p.date, challan: p.challan, qty: p.qty, damaged: p.damaged, note: p.note, freight: freight || undefined, freightInCost: freight ? !!p.freightInCost : undefined })
+    o.receipts.push({ id, ts: tick(d), date: p.date, challan: p.challan, qty: p.qty, damaged: p.damaged, note: p.note, freight: freight || undefined, freightInCost: freight ? !!p.freightInCost : undefined, siteId: siteOk(d, p.siteId) })
     if (freight) {
       d.expenses.push({ id: uid(d, 'ex'), ts: tick(d), date: p.date, head: TRANSPORT_HEAD, amount: freight, method: p.method || 'Cash',
         details: `Freight to warehouse · ${o.id}${p.challan ? ` · ${p.challan}` : ''}`, transport: { kind: 'Freight to warehouse', orderId: o.id } })
@@ -236,11 +240,64 @@ export const actions = {
   addSupplier(d: Db, p: Omit<Supplier, 'id'>) {
     d.suppliers.push({ id: uid(d, 's'), ...p })
   },
-  newPurchase(d: Db, p: { supplierId: string; billNo: string; date: ISODate; productId: string; qty: number; rate: number; terms: SupplierTerms; paid: number; method: string; tax?: number; attachments?: Attachment[] }) {
+  /** Add a supplier or change its details. */
+  saveSupplier(d: Db, p: Omit<Supplier, 'id'> & { id?: string }) {
+    const name = p.name.trim()
+    if (!name) throw new Error('Enter the supplier name')
+    if (d.suppliers.some((x) => x.id !== p.id && x.name.toLowerCase() === name.toLowerCase())) throw new Error('There is already a supplier with that name')
+    const { id, ...rest } = p
+    const at = d.suppliers.findIndex((x) => x.id === id)
+    // replace the whole record, so details cleared in the form are cleared here too
+    if (at >= 0) d.suppliers[at] = { ...rest, name, id: d.suppliers[at].id }
+    else d.suppliers.push({ ...rest, name, id: uid(d, 's') })
+  },
+  /** Add or change a warehouse site. Only one is the main one. */
+  saveWarehouse(d: Db, p: Omit<WarehouseSite, 'id'> & { id?: string }) {
+    if (!p.name.trim()) throw new Error('Name the warehouse, e.g. Main godown, Chattogram')
+    const list = (d.warehouses ??= [])
+    if (p.main || !list.length) for (const w of list) delete w.main
+    const cur = byId(list, p.id)
+    if (cur) {
+      const { id: _id, ...rest } = p
+      Object.assign(cur, { ...rest, main: p.main || !list.some((w) => w.main && w.id !== cur.id) || undefined })
+    } else list.push({ ...p, name: p.name.trim(), id: uid(d, 'wh'), main: p.main || !list.length || undefined })
+  },
+  removeWarehouse(d: Db, id: string) {
+    const w = mustFind(d.warehouses || [], id, 'Warehouse')
+    if (!w.main && siteHolds(d, id)) throw new Error(`${w.name} still holds stock. Move it to another warehouse first.`)
+    d.warehouses = (d.warehouses || []).filter((w) => w.id !== id)
+    if (d.warehouses.length && !d.warehouses.some((w) => w.main)) d.warehouses[0].main = true
+  },
+  /** Move goods from one of our warehouses to another. Totals do not change. */
+  transferStock(d: Db, p: { date: ISODate; from: string; to: string; lines: { productId: string; qty: number }[]; note: string; by: string }) {
+    const list = d.warehouses || []
+    const from = mustFind(list, p.from, 'Warehouse')
+    const to = mustFind(list, p.to, 'Warehouse')
+    if (from.id === to.id) throw new Error('Pick two different warehouses')
+    const lines = p.lines.filter((l) => l.qty > 0)
+    if (!lines.length) throw new Error('Add at least one item and quantity')
+    if (new Set(lines.map((l) => l.productId)).size !== lines.length) throw new Error('An item is in the list twice')
+    for (const l of lines) {
+      const prod = mustFind(d.products, l.productId, 'Product')
+      const have = qtyAt(d, from.id, l.productId)
+      if (l.qty > have + 1e-9) throw new Error(`Only ${fmt(Math.max(have, 0))} ${prod.unit} of ${prod.name} in ${from.name}`)
+    }
+    ;(d.stockTransfers ??= []).push({ id: 'TR-' + String(Math.max(0, ...(d.stockTransfers || []).map((t) => Number(t.id.slice(3)) || 0)) + 1).padStart(3, '0'), ts: tick(d), date: p.date, from: from.id, to: to.id, lines, note: p.note.trim(), by: p.by })
+  },
+  /** Undo a move, while the goods are still in the warehouse they went to. */
+  cancelTransfer(d: Db, id: string) {
+    const t = mustFind(d.stockTransfers || [], id, 'Transfer')
+    for (const l of t.lines) {
+      const prod = byId(d.products, l.productId)
+      if (qtyAt(d, t.to, l.productId) < l.qty - 1e-9) throw new Error(`Some ${prod?.name || 'goods'} from this move have already left the warehouse; move them back instead`)
+    }
+    d.stockTransfers = (d.stockTransfers || []).filter((x) => x.id !== id)
+  },
+  newPurchase(d: Db, p: { supplierId: string; billNo: string; date: ISODate; productId: string; qty: number; rate: number; terms: SupplierTerms; paid: number; method: string; tax?: number; attachments?: Attachment[]; siteId?: string }) {
     const id = uid(d, 'pur')
     d.seq.pb++
     if ((p.tax || 0) < 0) throw new Error('VAT cannot be negative')
-    d.purchases.push({ id, billNo: p.billNo, ts: tick(d), supplierId: p.supplierId, date: p.date, productId: p.productId, qty: p.qty, rate: p.rate, terms: p.terms, tax: p.tax || undefined })
+    d.purchases.push({ id, billNo: p.billNo, ts: tick(d), supplierId: p.supplierId, date: p.date, productId: p.productId, qty: p.qty, rate: p.rate, terms: p.terms, tax: p.tax || undefined, siteId: siteOk(d, p.siteId) })
     const prod = mustFind(d.products, p.productId, 'Product')
     prod.stock += p.qty
     prod.cost = p.rate
@@ -262,9 +319,10 @@ export const actions = {
   addImportCost(d: Db, p: { importId: string; type: string; amount: number; method: string; date: ISODate }) {
     mustFind(d.imports, p.importId, 'Shipment').costs.push({ id: uid(d, 'ic'), ts: tick(d), type: p.type, amount: p.amount, method: p.method, date: p.date })
   },
-  markImportStep(d: Db, p: { importId: string; key: StepKey; date: ISODate }) {
+  markImportStep(d: Db, p: { importId: string; key: StepKey; date: ISODate; siteId?: string }) {
     const s = mustFind(d.imports, p.importId, 'Shipment')
     s.steps[p.key] = { date: p.date }
+    if (p.key === 'warehouse' && s.direction !== 'export') s.siteId = siteOk(d, p.siteId)
     const prod = byId(d.products, s.productId)
     if (!prod) return
     if (s.direction !== 'export' && p.key === 'warehouse') {
@@ -491,10 +549,209 @@ export const actions = {
     d.company.salesTarget = p.company || undefined
     for (const e of d.employees) if (e.id in p.staff) e.salesTarget = p.staff[e.id] || undefined
   },
-  saveEmployee(d: Db, p: Omit<Employee, 'id'> & { id?: string }) {
+  /** Add or change an employee or worker. Changes of job, pay or department go into their job history by themselves. */
+  saveEmployee(d: Db, p: Omit<Employee, 'id' | 'history'> & { id?: string }) {
+    if (!p.name.trim()) throw new Error('Enter the name')
+    if (p.payType === 'daily' && !(p.dailyRate && p.dailyRate > 0)) throw new Error('Enter the daily wage')
+    if (p.payType === 'contract' && !(p.contract && p.contract.amount > 0)) throw new Error('Enter the contract amount')
     const cur = byId(d.employees, p.id)
-    if (cur) Object.assign(cur, p)
-    else d.employees.push({ ...p, id: uid(d, 'e') })
+    const day = todayISO()
+    const ev = (kind: JobEvent['kind'], text: string, date = day): JobEvent => ({ id: uid(d, 'jh'), date, kind, text })
+    const payText = (e: Pick<Employee, 'payType' | 'salary' | 'rate' | 'dailyRate' | 'contract'>) =>
+      e.payType === 'sales' ? `${e.rate}% commission` : e.payType === 'daily' ? `${fmt(e.dailyRate || 0)} a day` : e.payType === 'contract' ? `contract ${fmt(e.contract?.amount || 0)}` : `${fmt(e.salary)} a month`
+    const { id: _id, ...rest } = p
+    if (cur) {
+      const history = [...(cur.history || [])]
+      if ((cur.role || '') !== (p.role || '')) history.push(ev('role', `Job changed: ${cur.role || '—'} → ${p.role || '—'}`))
+      if ((cur.department || '') !== (p.department || '')) history.push(ev('department', `Moved: ${cur.department || '—'} → ${p.department || '—'}`))
+      if (payText(cur) !== payText(p)) history.push(ev('pay', `Pay changed: ${payText(cur)} → ${payText(p)}`))
+      if (p.payType === 'contract' && p.contract && JSON.stringify(cur.contract) !== JSON.stringify(p.contract) && cur.payType === 'contract') history.push(ev('contract', `Contract changed: ${p.contract.work || 'work'}, ${p.contract.start} to ${p.contract.end}`))
+      const at = d.employees.indexOf(cur)
+      d.employees[at] = { ...rest, id: cur.id, history, status: cur.status, leftOn: cur.leftOn }
+    } else {
+      const e: Employee = { ...rest, id: uid(d, 'e'), status: 'active', history: [] }
+      e.history!.push(ev('joined', `Joined as ${p.role || (p.kind === 'worker' ? 'worker' : 'staff')}${p.department ? `, ${p.department}` : ''} · ${payText(p)}`, p.joined || day))
+      if (p.payType === 'contract' && p.contract) e.history!.push(ev('contract', `Contract: ${p.contract.work || 'work'}, ${p.contract.start} to ${p.contract.end}`, p.contract.start || day))
+      d.employees.push(e)
+    }
+  },
+  /** Write something in a person's job history: a promotion letter, a warning, training, an award. */
+  addJobEvent(d: Db, p: { employeeId: string; date: ISODate; kind: JobEvent['kind']; text: string }) {
+    if (!p.text.trim()) throw new Error('Write what happened')
+    const e = mustFind(d.employees, p.employeeId, 'Employee')
+    ;(e.history ??= []).push({ id: uid(d, 'jh'), date: p.date, kind: p.kind, text: p.text.trim() })
+  },
+  removeJobEvent(d: Db, p: { employeeId: string; eventId: string }) {
+    const e = mustFind(d.employees, p.employeeId, 'Employee')
+    e.history = (e.history || []).filter((h) => h.id !== p.eventId)
+  },
+  /** Someone leaves, or comes back. Their history, pay and attendance stay. */
+  setEmployeeStatus(d: Db, p: { employeeId: string; left: boolean; date: ISODate; reason?: string }) {
+    const e = mustFind(d.employees, p.employeeId, 'Employee')
+    if (p.left) {
+      e.status = 'left'
+      e.leftOn = p.date
+      ;(e.history ??= []).push({ id: uid(d, 'jh'), date: p.date, kind: 'left', text: `Left${p.reason?.trim() ? `: ${p.reason.trim()}` : ''}` })
+    } else {
+      e.status = 'active'
+      delete e.leftOn
+      ;(e.history ??= []).push({ id: uid(d, 'jh'), date: p.date, kind: 'rejoined', text: 'Back at work' })
+    }
+  },
+  /** Add or change a workplace: office, warehouse, factory floor, sales region, branch. */
+  savePlace(d: Db, p: Omit<WorkPlace, 'id'> & { id?: string }) {
+    const name = p.name.trim()
+    if (!name) throw new Error('Name the place, e.g. Head office, Dhaka North region')
+    const list = (d.workplaces ??= [])
+    if (list.some((x) => x.id !== p.id && x.name.toLowerCase() === name.toLowerCase())) throw new Error('There is already a place with that name')
+    const { id, ...rest } = p
+    const at = list.findIndex((x) => x.id === id)
+    if (at >= 0) list[at] = { ...rest, name, id: list[at].id }
+    else list.push({ ...rest, name, id: uid(d, 'wp') })
+  },
+  /** Remove a workplace nobody works at, and nobody is being moved to. */
+  removePlace(d: Db, id: string) {
+    const w = mustFind(d.workplaces || [], id, 'Workplace')
+    const here = d.employees.filter((e) => e.status !== 'left' && postingOf(d, e).place?.id === id)
+    if (here.length) throw new Error(`${here.length} ${here.length === 1 ? 'person works' : 'people work'} at ${w.name}. Transfer them first.`)
+    if ((d.staffTransfers || []).some((t) => !t.cancelled && t.to === id && t.date > todayISO())) throw new Error(`Someone is being transferred to ${w.name}. Cancel that first.`)
+    // places with history are kept, hidden; unused ones go
+    if ((d.staffTransfers || []).some((t) => t.to === id || t.from === id) || d.employees.some((e) => e.placeId === id)) w.archived = true
+    else d.workplaces = (d.workplaces || []).filter((x) => x.id !== id)
+  },
+  /** Order someone to another workplace from a date. It goes into their job history. */
+  transferStaff(d: Db, p: { employeeId: string; to: string; date: ISODate; orderNo: string; reason: string; newRole?: string; allowance?: number; note: string; by: string; at: string }) {
+    const e = mustFind(d.employees, p.employeeId, 'Employee')
+    if (e.status === 'left') throw new Error(`${e.name} has left`)
+    const to = mustFind(d.workplaces || [], p.to, 'Workplace')
+    if (!p.date) throw new Error('Pick the date they start there')
+    if (p.date < e.joined) throw new Error('That is before they joined')
+    if (!p.reason.trim()) throw new Error('Write why they are moved')
+    const was = postingOf(d, e, p.date)
+    if (was.place?.id === to.id) throw new Error(`${e.name} already works at ${to.name} on that day`)
+    if ((d.staffTransfers || []).some((t) => t.employeeId === e.id && !t.cancelled && t.date === p.date)) throw new Error('There is already a transfer for this person on that day')
+    const n = Math.max(0, ...(d.staffTransfers || []).map((t) => Number(t.id.slice(3)) || 0)) + 1
+    const id = 'ST-' + String(n).padStart(3, '0')
+    ;(d.staffTransfers ??= []).push({
+      id, employeeId: e.id, from: was.place?.id || '', to: to.id, date: p.date, orderNo: p.orderNo.trim(), reason: p.reason.trim(),
+      newRole: p.newRole?.trim() || undefined, allowance: p.allowance && p.allowance > 0 ? p.allowance : undefined, note: p.note.trim(), by: p.by, at: p.at,
+    })
+    ;(e.history ??= []).push({ id: uid(d, 'jh'), date: p.date, kind: 'transfer', text: `Transferred ${was.place ? `from ${was.place.name} ` : ''}to ${to.name}${p.orderNo.trim() ? ` (order ${p.orderNo.trim()})` : ''}${p.newRole?.trim() ? ` as ${p.newRole.trim()}` : ''}` })
+    // a new job title is set with the order
+    if (p.newRole?.trim() && p.newRole.trim() !== e.role) {
+      e.history.push({ id: uid(d, 'jh'), date: p.date, kind: 'role', text: `Job changed: ${e.role || '—'} → ${p.newRole.trim()}` })
+      e.role = p.newRole.trim()
+    }
+  },
+  /** Take back a transfer order that has not taken effect yet. */
+  cancelStaffTransfer(d: Db, p: { id: string; today: ISODate }) {
+    const t = mustFind(d.staffTransfers || [], p.id, 'Transfer')
+    if (t.cancelled) throw new Error('Already cancelled')
+    if (t.date <= p.today) throw new Error('This transfer has taken effect; order a new transfer back instead')
+    t.cancelled = true
+    const e = byId(d.employees, t.employeeId)
+    if (e) (e.history ??= []).push({ id: uid(d, 'jh'), date: p.today, kind: 'transfer', text: `Transfer ${t.id} cancelled` })
+  },
+  /** An employee asks for leave. Anyone may ask for themselves; the admin approves or declines. */
+  requestLeave(d: Db, p: { employeeId: string; kind: LeaveRequest['kind']; from: ISODate; to: ISODate; half?: boolean; reason: string; by: string; at: string }) {
+    const e = mustFind(d.employees, p.employeeId, 'Employee')
+    if (e.status === 'left') throw new Error('This person has left')
+    if (!p.from || !p.to || p.to < p.from) throw new Error('The leave ends before it starts')
+    if (p.half && p.from !== p.to) throw new Error('A half day is one day only')
+    if (datesBetween(p.from, p.to).length > 90) throw new Error('Ask for at most 90 days at a time')
+    if (!p.reason.trim()) throw new Error('Write a reason')
+    const clash = (d.leaveRequests || []).find((r) => r.employeeId === e.id && (r.status === 'pending' || r.status === 'approved') && r.from <= p.to && r.to >= p.from)
+    if (clash) throw new Error(`These days overlap leave already asked for (${clash.id}, ${clash.from} to ${clash.to})`)
+    const n = Math.max(0, ...(d.leaveRequests || []).map((r) => Number(r.id.slice(3)) || 0)) + 1
+    ;(d.leaveRequests ??= []).push({ id: 'LV-' + String(n).padStart(3, '0'), employeeId: e.id, kind: p.kind, from: p.from, to: p.to, half: p.half || undefined, reason: p.reason.trim(), status: 'pending', askedAt: p.at, askedBy: p.by })
+  },
+  /** The person withdraws a request that is still waiting, or approved leave that has not started. */
+  cancelLeave(d: Db, p: { id: string; employeeId?: string; today: ISODate }) {
+    const r = mustFind(d.leaveRequests || [], p.id, 'Leave request')
+    if (p.employeeId && r.employeeId !== p.employeeId) throw new Error('That is not your request')
+    if (r.status === 'approved' && r.from <= p.today) throw new Error('This leave has already started; ask the office to change it')
+    if (r.status !== 'pending' && r.status !== 'approved') throw new Error('This request is already closed')
+    r.status = 'cancelled'
+    d.attendance = (d.attendance || []).filter((x) => x.leaveId !== r.id)
+  },
+  /** The admin approves (days go into the register as leave) or declines, with an answer. */
+  decideLeave(d: Db, p: { id: string; approve: boolean; answer: string; by: string; at: string }) {
+    const r = mustFind(d.leaveRequests || [], p.id, 'Leave request')
+    if (r.status !== 'pending') throw new Error('This request was already answered')
+    if (!p.approve && !p.answer.trim()) throw new Error('Say why it is declined')
+    r.status = p.approve ? 'approved' : 'declined'
+    r.decidedBy = p.by
+    r.decidedAt = p.at
+    r.answer = p.answer.trim() || undefined
+    if (!p.approve) return
+    const days = new Set(datesBetween(r.from, r.to))
+    const list = (d.attendance ??= []).filter((x) => !(x.employeeId === r.employeeId && days.has(x.date)))
+    for (const date of days) {
+      list.push({ id: uid(d, 'wd'), date, employeeId: r.employeeId, status: r.half ? 'half' : 'leave', work: '', note: `${LEAVE_KINDS[r.kind]} · ${r.id}`, leaveId: r.id })
+    }
+    d.attendance = list
+  },
+  /** Paid leave days each person gets in a year. Empty means no limit. */
+  setLeaveQuota(d: Db, p: Partial<Record<LeaveRequest['kind'], number>>) {
+    const q: Partial<Record<LeaveRequest['kind'], number>> = {}
+    for (const [k, v] of Object.entries(p)) if (typeof v === 'number' && Number.isFinite(v) && v >= 0) q[k as LeaveRequest['kind']] = v
+    d.leaveQuota = q
+  },
+  /** The attendance register for one day: replaces what was marked that day for these people. */
+  saveAttendance(d: Db, p: { date: ISODate; rows: Omit<WorkDay, 'id' | 'date'>[]; by?: string }) {
+    if (p.date > todayISO()) throw new Error('Attendance cannot be marked for a future day')
+    const ids = new Set(p.rows.map((r) => r.employeeId))
+    const before = new Map((d.attendance || []).filter((x) => x.date === p.date && ids.has(x.employeeId)).map((x) => [x.employeeId, x]))
+    const list = (d.attendance ??= []).filter((x) => !(x.date === p.date && ids.has(x.employeeId)))
+    for (const r of p.rows) {
+      mustFind(d.employees, r.employeeId, 'Employee')
+      const was = before.get(r.employeeId)
+      // a check-in and its place stay when the office fills in the register
+      list.push({
+        ...r, id: was?.id || uid(d, 'wd'), date: p.date, work: r.work.trim(), inAt: r.inAt ?? was?.inAt, outAt: r.outAt ?? was?.outAt, source: was?.source === 'self' ? 'self' : 'office',
+        lat: was?.lat, lng: was?.lng, distance: was?.distance, leaveId: was?.leaveId, editedBy: p.by || was?.editedBy, editedAt: p.by ? new Date().toISOString() : was?.editedAt,
+      })
+    }
+    d.attendance = list
+  },
+  /** The person checks in at work. Time and place come from the server; one check-in a day. */
+  checkIn(d: Db, p: { employeeId: string; date: ISODate; time: string; lat?: number; lng?: number }) {
+    const e = mustFind(d.employees, p.employeeId, 'Employee')
+    if (e.status === 'left') throw new Error('You are no longer on the staff list')
+    const cur = (d.attendance || []).find((a) => a.employeeId === e.id && a.date === p.date)
+    if (cur?.inAt) throw new Error(`You already checked in at ${cur.inAt}`)
+    if (cur && cur.status === 'leave') throw new Error('You are on leave today')
+    const place = postingOf(d, e, p.date).place
+    const site = atSite(place, p.lat, p.lng)
+    const row: WorkDay = { ...(cur || { id: uid(d, 'wd'), date: p.date, employeeId: e.id, work: '' }), status: 'present', inAt: p.time, source: 'self', lat: p.lat, lng: p.lng, distance: site?.distance }
+    d.attendance = [...(d.attendance || []).filter((a) => a !== cur), row]
+  },
+  /** The person checks out, with what they did today. */
+  checkOut(d: Db, p: { employeeId: string; date: ISODate; time: string; work: string; output?: number }) {
+    const cur = (d.attendance || []).find((a) => a.employeeId === p.employeeId && a.date === p.date)
+    if (!cur?.inAt) throw new Error('Check in first')
+    if (cur.outAt) throw new Error(`You already checked out at ${cur.outAt}`)
+    cur.outAt = p.time
+    cur.hours = hoursOf(cur) ?? undefined
+    if (p.work.trim()) cur.work = p.work.trim()
+    if (p.output && p.output > 0) cur.output = p.output
+  },
+  /** Correct one person's day: status, times, work. Empty status clears the day. */
+  editWorkDay(d: Db, p: { employeeId: string; date: ISODate; status: WorkDay['status'] | ''; inAt: string; outAt: string; work: string; output?: number; note: string; by: string }) {
+    mustFind(d.employees, p.employeeId, 'Employee')
+    if (p.date > todayISO()) throw new Error('A future day cannot be marked')
+    const ok = (t: string) => !t || /^([01]?\d|2[0-3]):[0-5]\d$/.test(t)
+    if (!ok(p.inAt) || !ok(p.outAt)) throw new Error('Times look like 09:05')
+    const cur = (d.attendance || []).find((a) => a.employeeId === p.employeeId && a.date === p.date)
+    const rest = (d.attendance || []).filter((a) => a !== cur)
+    if (!p.status) { d.attendance = rest; return }
+    const row: WorkDay = {
+      ...(cur || { id: uid(d, 'wd'), date: p.date, employeeId: p.employeeId, work: '' }),
+      status: p.status, inAt: p.inAt || undefined, outAt: p.outAt || undefined, work: p.work.trim(), output: p.output && p.output > 0 ? p.output : undefined,
+      note: p.note.trim() || undefined, source: cur?.source === 'self' ? 'self' : 'office', editedBy: p.by, editedAt: new Date().toISOString(),
+    }
+    row.hours = hoursOf(row) ?? (p.status === 'present' ? 8 : p.status === 'half' ? 4 : undefined)
+    d.attendance = [...rest, row]
   },
   payPayroll(d: Db, p: { month: MonthKey; date: ISODate; method: string; lines: PayrollLine[] }) {
     d.payroll.push({ id: uid(d, 'pr'), ts: tick(d), ...p })
@@ -849,6 +1106,15 @@ export type ActionName = keyof Actions
 export type ActionPayload<K extends ActionName> = Parameters<Actions[K]>[1]
 
 /** Apply one action to a copy of the books and return the copy. The original is never changed. */
+/** A warehouse id that exists, or nothing (the main one). */
+function siteOk(d: Db, id?: string): string | undefined {
+  return id && (d.warehouses || []).some((w) => w.id === id) ? id : undefined
+}
+/** Does this warehouse hold any stock? */
+function siteHolds(d: Db, id: string): boolean {
+  return [...siteStock(d).qty.values()].some((row) => (row[id] || 0) > 0.0001)
+}
+
 export function applyAction<K extends ActionName>(db: Db, name: K, payload: ActionPayload<K>): Db {
   const draft = structuredClone(db)
   ;(actions[name] as (d: Db, p: ActionPayload<K>) => void)(draft, payload)

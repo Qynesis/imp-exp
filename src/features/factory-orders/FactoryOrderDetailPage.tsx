@@ -1,5 +1,5 @@
 import { useSee } from '@/app/useSee'
-import { byId, byDateTs, fdate, fmt, foCalc, tk, type FactoryReceipt, type FactoryBill } from '@shared/domain'
+import { byId, byDateTs, fdate, fmt, foCalc, tk, type FactoryReceipt, type FactoryBill, fullAddress } from '@shared/domain'
 import { CustomView } from '@/components/CustomFields'
 import { ClipButton } from '@/components/attachments/Attachments'
 import { PageHead } from '@/components/PageHead'
@@ -11,6 +11,7 @@ import { OrderProgress } from './OrderProgress'
 import { OrderStatementDoc } from './orderDocs'
 import { orderStatementText } from './orderText'
 import { AmendOrderSheet } from './sheets/AmendOrderSheet'
+import { FactoryDetailSheet } from './sheets/FactoryDetailSheet'
 import { EstimateDetailSheet } from './sheets/EstimateDetailSheet'
 import { FactoryBillSheet } from './sheets/FactoryBillSheet'
 import { ReceiveShipmentSheet } from './sheets/ReceiveShipmentSheet'
@@ -74,7 +75,7 @@ export function FactoryOrderDetailPage({ id }: { id: string }) {
         back={{ to: 'factory-orders', label: 'Factory orders' }}
         title={`${o.id} · ${c.product?.name}`}
         pill={<Pill tone={c.tone}>{c.status}</Pill>}
-        sub={<>{c.factory?.name} · Type {o.type}, {c.typeLabel.toLowerCase()} · Placed {fdate(o.placed)}{o.estimateId && <> · from <button type="button" className="link" onClick={() => sheets.open(EstimateDetailSheet, { estimateId: o.estimateId as string })}>{o.estimateId}</button></>}</>}
+        sub={<>{c.factory ? <button type="button" className="link" onClick={() => sheets.open(FactoryDetailSheet, { factoryId: c.factory!.id })}>{c.factory.name}</button> : 'Factory'}{c.factory && fullAddress(c.factory) ? `, ${fullAddress(c.factory)}` : ''} · Type {o.type}, {c.typeLabel.toLowerCase()} · Placed {fdate(o.placed)}{o.estimateId && <> · from <button type="button" className="link" onClick={() => sheets.open(EstimateDetailSheet, { estimateId: o.estimateId as string })}>{o.estimateId}</button></>}</>}
         actions={
           <>
             <Button variant="secondary" icon="edit" disabled={c.pending <= 0} onClick={() => sheets.open(AmendOrderSheet, { orderId: o.id })}>Change order</Button>

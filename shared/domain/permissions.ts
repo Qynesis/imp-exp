@@ -9,6 +9,7 @@ export const PAGES: readonly (readonly [PageId, string])[] = [
   ['customs', 'Customs clearance'],
   ['products', 'Products and stock'],
   ['raw-materials', 'Raw materials'],
+  ['warehouse', 'Warehouse (receiving and sources)'],
   ['transport', 'Transport'],
   ['courier', 'Courier'],
   ['deliveries', 'Delivery and returns'],
@@ -18,6 +19,7 @@ export const PAGES: readonly (readonly [PageId, string])[] = [
   ['sales-analytics', 'Sales analytics'],
   ['cashbook', 'Cashbook and dues'],
   ['employees', 'Employees'],
+  ['attendance', 'Attendance (see and correct)'],
   ['expenses', 'Expenses (one-time and regular)'],
   ['accounts', 'Accounts, tax and VAT'],
   ['fixed-assets', 'Fixed assets'],
@@ -35,8 +37,10 @@ export const defaultRoles = (): Role[] => [
   { id: OWNER_ROLE_ID, name: 'Owner', system: true, perms: {} },
   { id: 'accountant', name: 'Accountant', perms: perms(['suppliers', 'cashbook', 'employees', 'customs'], ['dashboard', 'dealers', 'reports', 'imports', 'factory-orders', 'raw-materials']), see: { cost: true, profit: true } },
   { id: 'sales', name: 'Sales', perms: perms(['sell', 'dealers'], ['products']), see: { cost: false, profit: false } },
+  // staff who only see their own work, salary and job history (My work)
+  { id: 'staff', name: 'Employee (own profile only)', perms: {}, see: { cost: false, profit: false } },
   // the warehouse receives goods from suppliers and factories, so it sees suppliers and what they send, but not the prices
-  { id: 'warehouse', name: 'Warehouse', perms: perms(['factory-orders', 'products', 'raw-materials', 'deliveries', 'suppliers'], ['imports', 'customs']), see: { cost: false, profit: false } },
+  { id: 'warehouse', name: 'Warehouse', perms: perms(['warehouse', 'factory-orders', 'products', 'raw-materials', 'deliveries', 'suppliers'], ['imports', 'customs']), see: { cost: false, profit: false } },
 ]
 
 /** What a user may do on a screen. The Owner role can do everything. */
@@ -44,6 +48,8 @@ export function levelFor(db: Pick<Db, 'users' | 'roles'>, userId: string, page: 
   const user = db.users.find((u) => u.id === userId)
   const role = user && db.roles.find((r) => r.id === user.roleId)
   if (!role) return 'none'
+  // everyone linked to an employee sees their own work, pay and history, read-only
+  if (page === 'my-work') return user.employeeId ? 'view' : 'none'
   if (role.id === OWNER_ROLE_ID) return 'edit'
   return roleLevel(role, page)
 }
@@ -59,7 +65,10 @@ export function roleLevel(role: Pick<Role, 'perms'>, page: PageId): AccessLevel 
 
 /** Screens added after roles were first saved take the access of the screen they grew out of until an admin sets them. */
 const INHERITS: Partial<Record<PageId, PageId[]>> = {
+  attendance: ['employees'],
   'raw-materials': ['products'],
+  // whoever keeps stock receives goods
+  warehouse: ['products', 'raw-materials'],
   'sales-analytics': ['reports'],
   // stock people book trips, the accountant enters what transport costs
   transport: ['products', 'cashbook'],

@@ -1,4 +1,4 @@
-# Star Bangla Trading
+# Qyndms
 
 Books for importers, exporters and traders who order from factories: factory orders, suppliers,
 LC shipments (import and export), customs clearance, stock, dealer sales and invoices, cashbook and

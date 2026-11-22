@@ -16,7 +16,8 @@ the API project. It has been checked with `prisma validate`, `prisma format` and
 | `categories` | `Category` | Self-relation for the tree |
 | `products` (+ `sources`, `supplierIds`, `recipe`) | `Product`, `ProductSupplier`, `RecipeLine` | `stock` is a cached total; `StockMove` is the ledger |
 | `adjustments`, `productions` | `StockAdjustment`, `Production`, `ProductionMaterial` | |
-| `factories` | `Factory` | |
+| `factories` | `Factory` | `PartyDetails` fields are nullable columns |
+| `warehouses` | `WarehouseSite` | `CREATE UNIQUE INDEX one_main_site ON "WarehouseSite"("tenantId") WHERE main;` |
 | `estimates` | `FactoryEstimate`, `EstimateMaterial` | |
 | `factoryOrders` (+ nested arrays) | `FactoryOrder`, `OrderMaterial`, `FactoryReceipt`, `FactoryBill`, `FactoryPayment`, `OrderAmendment`, `MaterialSettlement` | Each nested array becomes a child table |
 | `suppliers`, `purchases`, `supplierPayments` | same names | |

@@ -4,7 +4,7 @@ import { useSee } from '@/app/useSee'
 import { Hidden } from '@/components/Hidden'
 import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
-import { DataTable, Segmented, Sheet, useSheetItem, type SheetComponent } from '@/ui'
+import { DataTable, Segmented, Sheet, useSheetItem, type SheetComponent, SearchBox } from '@/ui'
 
 type By = 'item' | 'supplier'
 
@@ -30,7 +30,7 @@ export const SupplyOverviewSheet: SheetComponent<object> = () => {
     <Sheet title="What we buy, by supplier" crumb="Suppliers" wide>
       <div className="labels-filters">
         <Segmented<By> label="Group by" value={by} onChange={setBy} options={[{ value: 'item', label: 'By item' }, { value: 'supplier', label: 'By supplier' }]} />
-        <input className="in grow" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Item or supplier" aria-label="Search" />
+        <SearchBox value={q} onChange={setQ} placeholder="Item or supplier" label="Search" />
       </div>
       <DataTable rows={rows} rowKey={(r) => r.supplierId + r.productId} pageSize={25} onRow={(r) => { close(); go('suppliers/' + r.supplierId) }} empty="No purchases from suppliers yet."
         columns={[

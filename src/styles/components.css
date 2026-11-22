@@ -131,6 +131,8 @@
 /* ---------- forms ---------- */
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
 .form-grid.one { grid-template-columns: minmax(0, 1fr); }
+.form-grid .form-sub { grid-column: 1 / -1; margin: 10px 0 -6px; font: 600 12.5px var(--font); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.form-grid .extra-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 40px; gap: 8px; align-items: center; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; border: 0; padding: 0; margin: 0; }
 .field.wide { grid-column: 1 / -1; }
 .field.narrow { max-width: 420px; }
@@ -295,3 +297,40 @@ select.in { appearance: none; padding-right: 34px; background: var(--surface) ur
 .lang-switch.dark .lang-btn.on { background: var(--side-active); color: #fff; box-shadow: none; }
 .lang-bn body { line-height: 1.55; }
 .lang-bn .stat-label, .lang-bn .nav-item, .lang-bn .btn { letter-spacing: 0; }
+
+/* ---------- search box ---------- */
+.searchbox { position: relative; display: flex; align-items: center; flex: 0 1 300px; width: 300px; max-width: 100%; min-width: 0; }
+.searchbox.wide { flex: 1 1 100%; width: 100%; }
+.searchbox .in { min-height: 40px; padding-left: 38px; padding-right: 36px; }
+.searchbox .in::-webkit-search-cancel-button { display: none; }
+.searchbox-icon { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
+.searchbox-clear { position: absolute; right: 6px; display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+.searchbox-clear:hover { background: var(--fill); color: var(--ink); }
+/* beside a card title: the title keeps its room, the box drops below when space runs out */
+.card-head { flex-wrap: wrap; }
+.card-head-text { flex: 1 1 240px; }
+.card-head > .searchbox, .card-head > .tools-right { margin-left: auto; }
+/* a row of filters: search grows, choices keep their size */
+.filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.filter-bar > .searchbox { flex: 1 1 240px; width: auto; max-width: 420px; }
+.filter-bar > .seg-scroll, .filter-bar > .seg { min-width: 0; max-width: 100%; }
+.filter-bar > .field { flex: 0 1 180px; min-width: 150px; }
+@media (max-width: 719px) {
+  .searchbox, .filter-bar > .searchbox { flex: 1 1 100%; width: 100%; max-width: none; }
+  .filter-bar > .field { flex: 1 1 140px; }
+}
+.pager { justify-content: flex-start; }
+.pager-info { margin-right: auto; }
+.pager-size { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.pager-size .in { width: auto; min-height: 34px; padding: 4px 30px 4px 10px; background-position: right 10px center; font-size: 13.5px; }
+.pager-btns .icon-btn[aria-label="First page"], .pager-btns .icon-btn[aria-label="Last page"] { gap: 0; }
+.pager-btns .icon-btn[aria-label="First page"] svg + svg, .pager-btns .icon-btn[aria-label="Last page"] svg + svg { margin-left: -9px; }
+.pager-export { display: inline-flex; align-items: center; gap: 2px; padding: 2px 2px 2px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
+.pager-export button { border: 0; background: none; padding: 6px 10px; border-radius: 8px; font: 600 13px var(--font); color: var(--brand); cursor: pointer; }
+.pager-export button:hover:not(:disabled) { background: var(--fill); }
+.pager-export button:disabled { opacity: 0.6; cursor: progress; }
+@media (max-width: 719px) {
+  .pager-info { margin-right: 0; }
+  .pager-btns .icon-btn[aria-label="First page"], .pager-btns .icon-btn[aria-label="Last page"] { display: none !important; }
+}
+.pager-btns .icon-btn[aria-label="First page"], .pager-btns .icon-btn[aria-label="Last page"] { display: inline-flex; align-items: center; justify-content: center; }

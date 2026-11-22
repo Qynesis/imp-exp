@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { byId, dealerLedger, fshort, tk } from '@shared/domain'
 import { PageHead } from '@/components/PageHead'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, useForm, useSheets, useToast } from '@/ui'
+import { Button, Card, DataTable, useForm, useSheets, useToast, SearchBox } from '@/ui'
 import { DealerFields } from './DealerForm'
 import { dealerInit, dealerPayload } from './dealerFormModel'
 import { DealerStatementSheet } from './sheets/DealerStatementSheet'
@@ -19,7 +19,7 @@ export default function DealersPage() {
     <>
       <PageHead title="Dealers" sub="Everyone we sell to, their payment terms and what they still owe." />
       <div className="grid-side">
-        <Card title="All dealers" action={<input className="in search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or area" aria-label="Search dealers" />}>
+        <Card title="All dealers" action={<SearchBox value={q} onChange={setQ} placeholder="Search name or area" label="Search dealers" />}>
           <DataTable
             pageSize={25}
             rows={rows}

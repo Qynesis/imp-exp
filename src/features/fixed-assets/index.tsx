@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { assetCalc, assets, assetSummary, depreciationDue, fdate, fmonth, sum, thisMonth, tk, todayISO } from '@shared/domain'
 import { PageHead } from '@/components/PageHead'
 import { accessGuard, useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, Field, Pill, Segmented, Stat, useConfirm, useSheets, useToast } from '@/ui'
+import { Button, Card, DataTable, Field, Pill, Segmented, Stat, useConfirm, useSheets, useToast, SearchBox } from '@/ui'
 import { AssetDetailSheet } from './sheets/AssetDetailSheet'
 import { AssetSheet } from './sheets/AssetSheet'
 
@@ -21,7 +21,8 @@ export default function FixedAssetsPage() {
   const dueTotal = sum(due, (x) => x.amount)
   const booked = assets(db).filter((a) => a.depreciation.some((x) => x.month === month))
   const canEdit = !accessGuard.readonly
-  const rows = assets(db).filter((a) => show === 'all' || a.status === show).sort((a, b) => (a.id < b.id ? 1 : -1))
+  const [q, setQ] = useState('')
+  const rows = assets(db).filter((a) => (show === 'all' || a.status === show) && (!q.trim() || `${a.id} ${a.name} ${a.category} ${a.location || ''}`.toLowerCase().includes(q.trim().toLowerCase()))).sort((a, b) => (a.id < b.id ? 1 : -1))
 
   const run = async () => {
     const ok = await confirm({ title: `Book ${fmonth(month)} depreciation?`, message: `${due.length} asset${due.length === 1 ? '' : 's'}, ${tk(dueTotal)} in all. It shows as an expense in that month’s profit and loss.`, confirmLabel: 'Book depreciation' })
@@ -55,7 +56,7 @@ export default function FixedAssetsPage() {
         </div>
       </Card>
 
-      <Card icon="building" title="Asset list" action={<Segmented<Show> label="Show" value={show} onChange={setShow} options={[{ value: 'active', label: 'In use' }, { value: 'disposed', label: 'Disposed' }, { value: 'all', label: 'All' }]} />}>
+      <Card icon="building" title="Asset list" action={<div className="tools-right"><Segmented<Show> label="Show" value={show} onChange={setShow} options={[{ value: 'active', label: 'In use' }, { value: 'disposed', label: 'Disposed' }, { value: 'all', label: 'All' }]} /><SearchBox value={q} onChange={setQ} placeholder="Asset, code or category" label="Search assets" /></div>}>
         <DataTable pageSize={20} rows={rows} rowKey={(a) => a.id} onRow={(a) => sheets.open(AssetDetailSheet, { assetId: a.id })}
           empty={show === 'disposed' ? 'No asset sold or scrapped yet.' : 'No fixed assets yet. Add machines, vehicles, furniture or computers the company owns.'}
           columns={[

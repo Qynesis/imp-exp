@@ -217,6 +217,32 @@ enum CourierProvider {
 enum PayType {
   salary
   sales
+  daily
+  contract
+}
+
+enum StaffKind {
+  staff
+  worker
+}
+
+enum DayStatus {
+  present
+  half
+  absent
+  leave
+}
+
+enum JobEventKind {
+  joined
+  role
+  pay
+  department
+  contract
+  note
+  left
+  rejoined
+  transfer
 }
 
 enum CommissionOn {
@@ -227,6 +253,8 @@ enum CommissionOn {
 enum PayrollKind {
   salary
   commission
+  wage
+  contract
 }
 
 enum DepreciationMethod {
@@ -369,6 +397,7 @@ model Tenant {
   estimates        FactoryEstimate[]
   factoryOrders    FactoryOrder[]
   suppliers        Supplier[]
+  warehouseSites   WarehouseSite[]
   purchases        Purchase[]
   supplierPayments SupplierPayment[]
   shipments        Shipment[]
@@ -667,6 +696,20 @@ model Factory {
   phone     String            @default("")
   address   String            @default("")
   makes     String            @default("")
+  archived  Boolean           @default(false)
+  // contact, address and papers (PartyDetails in shared/domain/types.ts)
+  altPhone     String?
+  email        String?
+  website      String?
+  area         String?
+  city         String?
+  district     String?
+  country      String?
+  postCode     String?
+  tradeLicense String?
+  taxNo        String?
+  bank         String?
+  note         String?
   legacyId  String?
   estimates FactoryEstimate[]
   orders    FactoryOrder[]
@@ -858,6 +901,19 @@ model Supplier {
   days      Int               @default(0)
   opening   Decimal           @default(0) @db.Decimal(14, 2)
   custom    Json              @default("{}")
+  // contact, address and papers (PartyDetails in shared/domain/types.ts)
+  altPhone     String?
+  email        String?
+  website      String?
+  area         String?
+  city         String?
+  district     String?
+  country      String?
+  postCode     String?
+  tradeLicense String?
+  taxNo        String?
+  bank         String?
+  note         String?
   legacyId  String?
   products  ProductSupplier[]
   purchases Purchase[]
@@ -1406,7 +1462,30 @@ model Employee {
   commissionOn CommissionOn  @default(sales)
   joined       DateTime      @db.Date
   salesTarget  Decimal?      @db.Decimal(14, 2)
+  kind         StaffKind     @default(staff)
+  department   String        @default("")
+  address      String        @default("")
+  nid          String        @default("")
+  emergency    String        @default("")
+  note         String        @default("")
+  /// Daily pay
+  dailyRate    Decimal?      @db.Decimal(14, 2)
+  /// Contract pay
+  contractAmount Decimal?    @db.Decimal(14, 2)
+  contractStart  DateTime?   @db.Date
+  contractEnd    DateTime?   @db.Date
+  contractWork   String?
+  active       Boolean       @default(true)
+  leftOn       DateTime?     @db.Date
+  /// [{ label, value }]: details only this person has.
+  extra        Json          @default("[]")
+  /// Values of the company's employee custom fields.
+  custom       Json          @default("{}")
   legacyId     String?
+  history      JobEvent[]
+  workDays     WorkDay[]
+  /// First workplace; later moves are StaffTransfer rows.
+  placeId      String?       @db.Uuid
   users        User[]
   dealers      Dealer[]
   quotes       SalesQuote[]
@@ -1862,4 +1941,161 @@ model IdempotencyKey {
 
   @@id([tenantId, key])
   @@index([createdAt])
+}
+
+/// A warehouse or godown. One per tenant is the main one (partial unique index in 02 §2.3).
+model WarehouseSite {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @db.Uuid
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name     String
+  address  String  @default("")
+  area     String  @default("")
+  city     String  @default("")
+  manager  String  @default("")
+  phone    String  @default("")
+  /// Free text as people say it: "8,000 cartons", "12,000 sq ft".
+  capacity String  @default("")
+  note     String  @default("")
+  main     Boolean @default(false)
+  legacyId String?
+
+  @@index([tenantId])
+}
+
+/// A line in a person's job history. Pay, job and department changes are written by the service when the employee is saved.
+model JobEvent {
+  id         String       @id @default(uuid()) @db.Uuid
+  tenantId   String       @db.Uuid
+  employeeId String       @db.Uuid
+  employee   Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime     @db.Date
+  kind       JobEventKind
+  text       String
+
+  @@index([tenantId, employeeId, date])
+}
+
+/// The daily register: one row per person per day.
+model WorkDay {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @db.Uuid
+  employeeId String    @db.Uuid
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  date       DateTime  @db.Date
+  status     DayStatus
+  hours      Decimal?  @db.Decimal(5, 2)
+  work       String    @default("")
+  output     Decimal?  @db.Decimal(14, 2)
+  note       String?
+
+  @@unique([tenantId, employeeId, date])
+  @@index([tenantId, date])
+}
+
+/// Goods moved between two of a tenant's warehouses.
+model StockTransfer {
+  id       String   @id @default(uuid()) @db.Uuid
+  tenantId String   @db.Uuid
+  number   String
+  date     DateTime @db.Date
+  fromId   String   @db.Uuid
+  toId     String   @db.Uuid
+  note     String   @default("")
+  by       String   @default("")
+  /// [{ productId, qty }]
+  lines    Json
+
+  @@unique([tenantId, number])
+  @@index([tenantId, date])
+}
+
+enum LeaveKind {
+  casual
+  sick
+  annual
+  unpaid
+  other
+}
+
+enum LeaveStatus {
+  pending
+  approved
+  declined
+  cancelled
+}
+
+/// Leave an employee asks for; the admin approves or declines it.
+model LeaveRequest {
+  id         String      @id @default(uuid()) @db.Uuid
+  tenantId   String      @db.Uuid
+  number     String
+  employeeId String      @db.Uuid
+  kind       LeaveKind
+  fromDate   DateTime    @db.Date
+  toDate     DateTime    @db.Date
+  half       Boolean     @default(false)
+  reason     String
+  status     LeaveStatus @default(pending)
+  askedAt    DateTime    @db.Timestamptz(3)
+  askedBy    String
+  decidedBy  String?
+  decidedAt  DateTime?   @db.Timestamptz(3)
+  answer     String?
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status])
+  @@index([tenantId, employeeId, fromDate])
+}
+
+enum PlaceKind {
+  office
+  warehouse
+  factory
+  region
+  branch
+  other
+}
+
+/// Where people work. A person's posting on a day is their latest transfer on or before it.
+model WorkPlace {
+  id       String    @id @default(uuid()) @db.Uuid
+  tenantId String    @db.Uuid
+  name     String
+  kind     PlaceKind
+  region   String    @default("")
+  area     String    @default("")
+  address  String    @default("")
+  headId   String?   @db.Uuid
+  headName String?
+  phone    String    @default("")
+  hours    String    @default("")
+  note     String    @default("")
+  siteId   String?   @db.Uuid
+  archived Boolean   @default(false)
+
+  @@unique([tenantId, name])
+}
+
+/// An order moving someone to another workplace from a date.
+model StaffTransfer {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @db.Uuid
+  number     String
+  employeeId String    @db.Uuid
+  fromId     String?   @db.Uuid
+  toId       String    @db.Uuid
+  date       DateTime  @db.Date
+  orderNo    String    @default("")
+  reason     String
+  newRole    String?
+  allowance  Decimal?  @db.Decimal(14, 2)
+  note       String    @default("")
+  by         String
+  at         DateTime  @db.Timestamptz(3)
+  cancelled  Boolean   @default(false)
+
+  @@unique([tenantId, number])
+  @@index([tenantId, employeeId, date])
+  @@index([tenantId, toId, date])
 }

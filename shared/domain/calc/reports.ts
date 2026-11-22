@@ -21,6 +21,8 @@ export const profitAndLoss = (db: Db, month: MonthKey) =>
     const expenses = [
       { label: 'Salaries', amount: pr.salaryTotal },
       { label: 'Sales commission', amount: pr.commission },
+      ...(pr.wages ? [{ label: 'Workers’ daily wages', amount: pr.wages }] : []),
+      ...(pr.contractPaid ? [{ label: 'Contract work', amount: pr.contractPaid }] : []),
       { label: 'Transport', amount: sum(exp.filter((e) => e.head === 'Transport'), (e) => e.amount) },
     ]
     const heads = new Map<string, number>()

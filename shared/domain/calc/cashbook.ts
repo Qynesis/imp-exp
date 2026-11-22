@@ -51,6 +51,8 @@ export const cashEntries = (db: Db): CashEntry[] =>
       const com = sum(p.lines.filter((l) => l.kind === 'commission'), (l) => l.amount)
       if (sal > 0) push(p.date, p.ts, `Salaries · ${fmonth(p.month)}`, 'Salary', 0, sal, p.method)
       if (com > 0) push(p.date, p.ts + 0.5, `Sales commission · ${fmonth(p.month)}`, 'Commission', 0, com, p.method)
+      const wage = sum(p.lines.filter((l) => l.kind === 'wage' || l.kind === 'contract'), (l) => l.amount)
+      if (wage > 0) push(p.date, p.ts + 0.7, `Workers’ wages · ${fmonth(p.month)}`, 'Wages', 0, wage, p.method)
     }
     for (const a of db.assets || []) {
       if (a.paidFrom && a.cost > 0) push(a.date, a.ts, `Fixed asset bought: ${a.name} (${a.id})`, 'Fixed asset', 0, a.cost, a.paidFrom)

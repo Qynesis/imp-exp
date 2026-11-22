@@ -1,10 +1,10 @@
 /** Factories, suppliers and employees seen as people we work with: one summary row each, and a profile. */
 import { addMonths, thisMonth } from '../format'
-import type { Db, Employee, Factory, ISODate, MonthKey } from '../types'
+import type { Db, Employee, Factory, ISODate, JobEvent, MonthKey, WorkDay } from '../types'
 import { byId, memo, sum } from './common'
 import { dealerLedger, invNet } from './dealers'
 import { foCalc } from './factory'
-import { payrollFor } from './payroll'
+import { DAY_WEIGHT, daysOf, payrollFor } from './payroll'
 
 /* ---------------------------------------------------------------- factories */
 
@@ -99,6 +99,13 @@ export interface EmployeeMonth {
   advance: number
   paidSalary: number
   paidCommission: number
+  /** Daily workers: days counted for pay, wage earned and paid. */
+  days: number
+  absent: number
+  output: number
+  wages: number
+  paidWages: number
+  paidContract: number
   toPay: number
   target: number
 }
@@ -112,6 +119,14 @@ export interface EmployeeProfile {
   payments: { date: ISODate; month: MonthKey; kind: string; amount: number; method: string }[]
   /** Sign-in for this person, if they have one. */
   login: { email: string; roleId: string } | null
+  /** Last 60 days of the attendance register, newest first. */
+  attendance: WorkDay[]
+  /** All time: days marked present (half days count 0.5), absent and on leave. */
+  totals: { days: number; absent: number; leave: number; output: number; earned: number; paid: number }
+  /** Contract staff: how much of the contract is paid. */
+  contract: { amount: number; paid: number; left: number } | null
+  /** Job history, newest first. */
+  history: JobEvent[]
 }
 
 export const employeeProfile = (db: Db, employeeId: string, count = 6): EmployeeProfile =>
@@ -123,12 +138,15 @@ export const employeeProfile = (db: Db, employeeId: string, count = 6): Employee
       const pr = payrollFor(db, month)
       const sal = pr.salary.find((r) => r.e.id === employeeId)
       const sales = pr.sales.find((r) => r.e.id === employeeId)
+      const wage = pr.daily.find((r) => r.e.id === employeeId)
       const bills = db.invoices.filter((x) => x.status === 'final' && !x.sample && x.soldBy === employeeId && x.date.slice(0, 7) === month)
-      const paid = (kind: 'salary' | 'commission') => sum(db.payroll.filter((p) => p.month === month).flatMap((p) => p.lines).filter((l) => l.employeeId === employeeId && l.kind === kind), (l) => l.amount)
+      const paid = (kind: 'salary' | 'commission' | 'wage' | 'contract') => sum(db.payroll.filter((p) => p.month === month).flatMap((p) => p.lines).filter((l) => l.employeeId === employeeId && l.kind === kind), (l) => l.amount)
       months.push({
         month, sold: Math.round(sum(bills, invNet)), bills: bills.length, collected: sales?.collected ?? sum(db.collections.filter((c) => c.collectedBy === employeeId && c.date.slice(0, 7) === month), (c) => c.amount),
-        commission: sales?.commission || 0, salary: sal?.salary || 0, advance: sal?.advance || 0, paidSalary: paid('salary'), paidCommission: paid('commission'),
-        toPay: (sal?.toPay || 0) + (sales?.toPay || 0), target: employee.salesTarget || 0,
+        commission: sales?.commission || 0, salary: sal?.salary || 0, advance: (sal?.advance || 0) + (wage?.advance || 0), paidSalary: paid('salary'), paidCommission: paid('commission'),
+        days: wage?.days ?? sum(daysOf(db, employeeId, month), (d) => DAY_WEIGHT[d.status]), absent: wage?.absent ?? daysOf(db, employeeId, month).filter((d) => d.status === 'absent').length,
+        output: wage?.output ?? sum(daysOf(db, employeeId, month), (d) => d.output || 0), wages: wage?.earned || 0, paidWages: paid('wage'), paidContract: paid('contract'),
+        toPay: (sal?.toPay || 0) + (sales?.toPay || 0) + (wage?.toPay || 0), target: employee.salesTarget || 0,
       })
     }
     const dealers = db.dealers.filter((d) => d.salesId === employeeId && !d.sample).map((d) => {
@@ -138,9 +156,63 @@ export const employeeProfile = (db: Db, employeeId: string, count = 6): Employee
     const recentBills = db.invoices.filter((x) => x.status === 'final' && !x.sample && x.soldBy === employeeId).sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 8)
       .map((x) => ({ id: x.id, date: x.date, dealer: byId(db.dealers, x.dealerId)?.name || '', amount: invNet(x) }))
     const payments = [
-      ...db.payroll.flatMap((p) => p.lines.filter((l) => l.employeeId === employeeId).map((l) => ({ date: p.date, month: p.month, kind: l.kind === 'salary' ? 'Salary' : 'Commission', amount: l.amount, method: p.method }))),
+      ...db.payroll.flatMap((p) => p.lines.filter((l) => l.employeeId === employeeId).map((l) => ({ date: p.date, month: p.month, kind: ({ salary: 'Salary', commission: 'Commission', wage: 'Daily wage', contract: 'Contract' } as const)[l.kind], amount: l.amount, method: p.method }))),
       ...db.advances.filter((a) => a.employeeId === employeeId).map((a) => ({ date: a.date, month: a.date.slice(0, 7), kind: 'Advance', amount: a.amount, method: a.method })),
     ].sort((a, b) => (a.date < b.date ? 1 : -1))
     const user = db.users.find((u) => u.employeeId === employeeId)
-    return { employee, months, thisMonth: months[months.length - 1], dealers, recentBills, payments, login: user ? { email: user.email, roleId: user.roleId } : null }
+    const all = daysOf(db, employeeId)
+    const lines = db.payroll.flatMap((p) => p.lines).filter((l) => l.employeeId === employeeId)
+    const since = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10)
+    const c = employee.contract
+    const contractPaid = sum(lines.filter((l) => l.kind === 'contract'), (l) => l.amount)
+    return {
+      employee, months, thisMonth: months[months.length - 1], dealers, recentBills, payments, login: user ? { email: user.email, roleId: user.roleId } : null,
+      attendance: all.filter((d) => d.date >= since).reverse(),
+      totals: {
+        days: sum(all, (d) => DAY_WEIGHT[d.status]), absent: all.filter((d) => d.status === 'absent').length, leave: all.filter((d) => d.status === 'leave').length,
+        output: sum(all, (d) => d.output || 0), earned: Math.round(sum(all, (d) => DAY_WEIGHT[d.status]) * (employee.dailyRate || 0)), paid: sum(lines, (l) => l.amount),
+      },
+      contract: employee.payType === 'contract' && c ? { amount: c.amount, paid: contractPaid, left: Math.max(c.amount - contractPaid, 0) } : null,
+      history: [...(employee.history || [])].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    }
   })
+
+/* ---------------------------------------------------------------- the staff list */
+
+export const PAY_TYPES: Record<Employee['payType'], string> = { salary: 'Monthly salary', sales: 'Sales commission', daily: 'Daily wage', contract: 'Contract' }
+
+export interface StaffRow {
+  e: Employee
+  kind: 'staff' | 'worker'
+  left: boolean
+  /** Their mark in the register on `date`, if any. */
+  today: WorkDay | null
+  /** This month: days worked (daily), what is owed now. */
+  days: number
+  toPay: number
+  hasLogin: boolean
+  /** "Tk 18,000 a month", "Tk 650 a day"… */
+  pay: string
+}
+
+/** Everyone on the books with what matters at a glance, for the admin's list. */
+export const staffRows = (db: Db, date: ISODate, money: (n: number) => string): StaffRow[] =>
+  memo(db, 'staffRows:' + date, () => {
+    const month = date.slice(0, 7)
+    const pr = payrollFor(db, month)
+    return db.employees.map((e) => {
+      const owed = (pr.salary.find((r) => r.e.id === e.id)?.toPay || 0) + (pr.sales.find((r) => r.e.id === e.id)?.toPay || 0) + (pr.daily.find((r) => r.e.id === e.id)?.toPay || 0) + (pr.contract.find((r) => r.e.id === e.id)?.toPay || 0)
+      return {
+        e, kind: e.kind || 'staff', left: e.status === 'left',
+        today: (db.attendance || []).find((a) => a.employeeId === e.id && a.date === date) || null,
+        days: sum(daysOf(db, e.id, month), (d) => DAY_WEIGHT[d.status]),
+        toPay: owed, hasLogin: db.users.some((u) => u.employeeId === e.id),
+        pay: e.payType === 'sales' ? `${e.rate}% of ${e.commissionOn === 'collection' ? 'collection' : 'sales'}` : e.payType === 'daily' ? `${money(e.dailyRate || 0)} a day` : e.payType === 'contract' ? `${money(e.contract?.amount || 0)} contract` : `${money(e.salary)} a month`,
+      }
+    }).sort((a, b) => Number(a.left) - Number(b.left) || a.e.name.localeCompare(b.e.name))
+  })
+
+/** Names for the lines of a job history. */
+export const JOB_EVENT_KINDS: Record<JobEvent['kind'], string> = {
+  joined: 'Joined', role: 'Job or promotion', pay: 'Pay change', department: 'Moved department', contract: 'Contract', note: 'Note, training or award', left: 'Left', rejoined: 'Came back', transfer: 'Transfer',
+}

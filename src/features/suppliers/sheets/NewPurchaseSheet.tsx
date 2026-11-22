@@ -1,9 +1,10 @@
 import { useSee } from '@/app/useSee'
 import { useState } from 'react'
-import { activeProducts, byId, fmt, num, tk, todayISO, type Attachment, type SupplierTerms } from '@shared/domain'
+import { activeProducts, byId, fmt, num, tk, todayISO, type Attachment, type SupplierTerms, fullAddress, siteStock } from '@shared/domain'
 import { AttachField } from '@/components/attachments/Attachments'
 import { MethodSelect } from '@/components/MethodSelect'
 import { useBooks } from '@/core/store/context'
+import { SitePicker } from '@/components/SitePicker'
 import { Field, FormSheet, useForm, useToast } from '@/ui'
 
 /** Record goods bought from a local supplier. `productId` picks the item, and its usual supplier, in advance. */
@@ -18,6 +19,7 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
   const pool = [...activeProducts(db)].sort((a, b) => Number(a.kind === 'finished') - Number(b.kind === 'finished'))
   const first = preset || pool[0]
   const [v, set, bind, nbind] = useForm({
+    siteId: siteStock(db).mainId,
     supplierId: sup?.id || '', billNo: 'PB-' + db.seq.pb, date: todayISO(), productId: first?.id || '', qty: '',
     rate: first?.cost ? String(first.cost) : '', terms: (sup?.terms || 'credit') as SupplierTerms, paid: '', method: 'Cash', tax: '',
   })
@@ -39,16 +41,17 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
         if (tax < 0) return 'VAT cannot be negative.'
         const paid = !see.cost ? 0 : v.terms === 'cash' ? amount : num(v.paid)
         if (paid > amount) return `Paid now cannot be more than the bill of ${tk(amount)}.`
-        act('newPurchase', { supplierId: v.supplierId, billNo: v.billNo.trim() || 'PB-' + db.seq.pb, date: v.date, productId: v.productId, qty: num(v.qty), rate, terms: see.cost ? v.terms : 'credit', paid, method: v.method, tax: tax || undefined, attachments: files.length ? files : undefined })
+        act('newPurchase', { supplierId: v.supplierId, billNo: v.billNo.trim() || 'PB-' + db.seq.pb, date: v.date, productId: v.productId, qty: num(v.qty), rate, terms: see.cost ? v.terms : 'credit', paid, method: v.method, tax: tax || undefined, attachments: files.length ? files : undefined, siteId: v.siteId || undefined })
         toast(`${fmt(num(v.qty))} ${product.unit} added to stock`)
       }}>
-      <Field label="Supplier">
+      <Field label="Supplier" hint={(() => { const x = byId(db.suppliers, v.supplierId); return x ? [fullAddress(x), x.phone].filter(Boolean).join(' · ') || undefined : undefined })()}>
         <select {...bind('supplierId')}>
-          {db.suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {db.suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}{s.city || s.area ? ` · ${s.city || s.area}` : ''}</option>)}
         </select>
       </Field>
       <Field label="Bill number"><input {...bind('billNo')} placeholder="e.g. PB-222" /></Field>
       <Field label="Date"><input type="date" {...bind('date')} /></Field>
+      <SitePicker db={db} bind={bind('siteId')} />
       <Field label="Item">
         <select className="in" value={v.productId} onChange={(e) => {
           set('productId', e.target.value)

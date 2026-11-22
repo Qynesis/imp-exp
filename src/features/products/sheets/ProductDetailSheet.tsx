@@ -2,15 +2,17 @@ import { useSee } from '@/app/useSee'
 import { Hidden } from '@/components/Hidden'
 import { useState } from 'react'
 import {
-  atFactory, byId, categoryPath, fmt, fshort, isLowStock, lastsFor, PRODUCT_KINDS, PRODUCT_SOURCES, productInUse, productSources, productSuppliers, recipeInfo,
+  atFactory, byId, categoryPath, fmt, fshort, isLowStock, lastsFor, PRODUCT_KINDS, PRODUCT_SOURCES, productInUse, productOrigins, productSources, recipeInfo,
   stockHistory, tk, usageRate, usedIn, type ProductSource,
 } from '@shared/domain'
 import { CustomView } from '@/components/CustomFields'
 import { accessGuard, useBooks } from '@/core/store/context'
+import { FactoryDetailSheet } from '@/features/factory-orders/sheets/FactoryDetailSheet'
 import { NewFactoryOrderSheet } from '@/features/factory-orders/sheets/NewFactoryOrderSheet'
 import { SettleMaterialSheet } from '@/features/factory-orders/sheets/SettleMaterialSheet'
 import { NewShipmentSheet } from '@/features/shipments/sheets/NewShipmentSheet'
 import { NewPurchaseSheet } from '@/features/suppliers/sheets/NewPurchaseSheet'
+import { ImportSourceSheet, SupplierSourceSheet } from '@/features/warehouse/sheets/SourceSheets'
 import { Button, Icon, Pill, Sheet, type IconName, useConfirm, useSheetItem, useSheets, useToast, type SheetComponent } from '@/ui'
 import { AdjustStockSheet } from './AdjustStockSheet'
 import { ProduceSheet } from './ProduceSheet'
@@ -32,7 +34,7 @@ export const ProductDetailSheet: SheetComponent<{ productId: string }> = ({ prod
   const material = p.kind !== 'finished'
   const one = p.unit.replace(/s$/, '') || 'unit'
   const sources = productSources(db, p)
-  const suppliers = productSuppliers(db, p)
+  const origins = productOrigins(db, p.id)
   const recipe = recipeInfo(db, p)
   const uses = usedIn(db, p.id)
   const f = atFactory(db, p.id)
@@ -156,16 +158,30 @@ export const ProductDetailSheet: SheetComponent<{ productId: string }> = ({ prod
         </>
       )}
 
-      {suppliers.length > 0 && (
+      {origins.suppliers.length + origins.factories.length + origins.imports.length > 0 && (
         <>
-          <h3 className="sheet-h"><Icon name="truck" size={17} />Suppliers</h3>
+          <h3 className="sheet-h"><Icon name="pin" size={17} />Where it comes from</h3>
           <div className="rows flush">
-            {suppliers.map((s) => (
-              <div key={s.supplierId} className="row">
-                <span className="name normal">{s.name} {s.preferred && <Pill tone="good">Usual</Pill>}</span>
-                <span className="meta">{s.bills ? `${s.bills} bill${s.bills === 1 ? '' : 's'} · ${fmt(s.qty)} ${p.unit} · last ${fshort(s.lastDate)}` : 'Nothing bought yet'}</span>
-                <span className="amt">{s.lastRate ? `${tk(s.lastRate)}/${one}` : ''}</span>
-              </div>
+            {origins.suppliers.map((s) => (
+              <button key={'s' + s.id} type="button" className="row click" onClick={() => sheets.open(SupplierSourceSheet, { supplierId: s.id })}>
+                <span className="name normal two-line"><span>{s.name} <Pill tone="info">Supplier</Pill> {s.preferred && <Pill tone="good">Usual</Pill>}</span><small className="t-muted">{[s.phone, s.address].filter(Boolean).join(' · ') || 'No address yet'}</small></span>
+                <span className="meta">{s.deliveries ? `${s.deliveries} bill${s.deliveries === 1 ? '' : 's'} · ${fmt(s.qty)} ${p.unit} · last ${fshort(s.lastDate)}` : 'Nothing bought yet'}</span>
+                <span className="amt">{s.lastRate ? (see.cost ? `${tk(s.lastRate)}/${one}` : <Hidden />) : ''}</span>
+              </button>
+            ))}
+            {origins.factories.map((x) => (
+              <button key={'f' + x.id} type="button" className="row click" onClick={() => sheets.open(FactoryDetailSheet, { factoryId: x.id })}>
+                <span className="name normal two-line"><span>{x.name} <Pill tone="good">Factory</Pill></span><small className="t-muted">{[x.phone, x.address].filter(Boolean).join(' · ') || 'No address yet'}</small></span>
+                <span className="meta">{x.orders} order{x.orders === 1 ? '' : 's'} · {fmt(x.received)} {p.unit} received{x.pending > 0 ? ` · ${fmt(x.pending)} to come` : ''}{x.lastDate ? ` · last ${fshort(x.lastDate)}` : ''}</span>
+                <span className="amt">{x.lastRate ? (see.cost ? `${tk(x.lastRate)}/${one}` : <Hidden />) : ''}</span>
+              </button>
+            ))}
+            {origins.imports.map((x) => (
+              <button key={'i' + x.name} type="button" className="row click" onClick={() => sheets.open(ImportSourceSheet, { name: x.name })}>
+                <span className="name normal two-line"><span>{x.name} <Pill tone="warn">Import</Pill></span><small className="t-muted">{x.country || 'Abroad'}</small></span>
+                <span className="meta">{x.shipments} shipment{x.shipments === 1 ? '' : 's'} · {fmt(x.qty)} {p.unit} in{x.onTheWay > 0 ? ` · ${fmt(x.onTheWay)} on the way` : ''}{x.lastDate ? ` · last ${fshort(x.lastDate)}` : ''}</span>
+                <span className="amt">{x.perUnit ? (see.cost ? `${tk(x.perUnit)}/${one} landed` : <Hidden />) : ''}</span>
+              </button>
             ))}
           </div>
         </>

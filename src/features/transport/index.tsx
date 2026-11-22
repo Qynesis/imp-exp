@@ -11,7 +11,7 @@ import { PageHead } from '@/components/PageHead'
 import { PhoneLink } from '@/components/PhoneLink'
 import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, Empty, Icon, IconBadge, Pill, Segmented, Stat, useSheets } from '@/ui'
+import { Button, Card, DataTable, Empty, Icon, IconBadge, Pill, Segmented, Stat, useSheets, SearchBox } from '@/ui'
 import { PayTransporterSheet } from './sheets/PayTransporterSheet'
 import { TransportCostSheet } from './sheets/TransportCostSheet'
 import { TripDetailSheet } from './sheets/TripDetailSheet'
@@ -124,16 +124,18 @@ function TripsTab({ month }: { month: string }) {
   const { db } = useBooks()
   const sheets = useSheets()
   const [filter, setFilter] = useState<TripFilter>('all')
+  const [q, setQ] = useState('')
   const [from, to] = monthRange(month)
-  const rows = trips(db).filter((t) =>
+  const n = q.trim().toLowerCase()
+  const rows = trips(db).filter((t) => (!n || JSON.stringify([t.id, t.from, t.to, t.load, t.hire?.transporter]).toLowerCase().includes(n)) &&
     (filter === 'open' ? t.status === 'planned' || t.status === 'on-the-way' : t.date >= from && t.date <= to) &&
     (filter !== 'fleet' || !t.hire) && (filter !== 'hired' || !!t.hire))
   const open = trips(db).filter((t) => t.status === 'planned' || t.status === 'on-the-way').length
   return (
     <Card icon="route" title="Trips" sub={filter === 'open' ? 'Planned and on the way, any date' : fmonth(month)}
-      action={<Segmented<TripFilter> label="Show trips" value={filter} onChange={setFilter} options={[
+      action={<div className="tools-right"><Segmented<TripFilter> label="Show trips" value={filter} onChange={setFilter} options={[
         { value: 'all', label: 'All' }, { value: 'open', label: `Open (${open})` }, { value: 'fleet', label: 'Our vehicles' }, { value: 'hired', label: 'Hired' },
-      ]} />}>
+      ]} /><SearchBox value={q} onChange={setQ} placeholder="Trip, place, load or transporter" label="Search trips" /></div>}>
       <DataTable pageSize={25} rows={rows} rowKey={(t) => t.id} onRow={(t) => sheets.open(TripDetailSheet, { tripId: t.id })}
         empty={trips(db).length ? 'No trips here.' : 'No trips yet. Book the first one.'}
         columns={[

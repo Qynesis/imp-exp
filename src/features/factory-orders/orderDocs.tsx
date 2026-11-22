@@ -1,4 +1,4 @@
-import { byId, fdate, fmt, foCalc, tk, type Db, type FactoryEstimate, type FactoryOrder } from '@shared/domain'
+import { byId, fdate, fmt, foCalc, tk, type Db, type FactoryEstimate, type FactoryOrder, fullAddress } from '@shared/domain'
 
 /** Company name and contact line at the top of every printed page. */
 function Head({ db, title, sub }: { db: Db; title: string; sub: string }) {
@@ -32,7 +32,8 @@ export function EstimateDoc({ db, e }: { db: Db; e: FactoryEstimate }) {
         <div>
           <div className="inv-muted">To</div>
           <div className="inv-strong">{f?.name || 'Factory'}</div>
-          {f && <div className="inv-muted">{[f.contact, f.address, f.phone].filter(Boolean).join(' · ')}</div>}
+          {f && <div className="inv-muted">{fullAddress(f)}</div>}
+          {f && <div className="inv-muted">{[f.contact, f.phone, f.email].filter(Boolean).join(' · ')}</div>}
         </div>
         <div className="inv-right">
           <div className="inv-muted">{e.type === 1 ? 'We supply raw materials' : 'Factory supplies everything'}</div>
@@ -78,6 +79,7 @@ export function OrderStatementDoc({ db, o }: { db: Db; o: FactoryOrder }) {
         <div>
           <div className="inv-muted">Factory</div>
           <div className="inv-strong">{c.factory?.name}</div>
+          {c.factory && fullAddress(c.factory) && <div className="inv-muted">{fullAddress(c.factory)}</div>}
           <div className="inv-muted">{c.product?.name} · {fmt(o.qty)} {c.unit} at {tk(o.rate)} · placed {fdate(o.placed)}</div>
         </div>
         <div className="inv-right">

@@ -1,10 +1,10 @@
 import { AutoReminders } from '@/features/messages/AutoReminders'
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type LazyExoticComponent } from 'react'
 import { setMoney, type PageId } from '@shared/domain'
-import { POWERED_BY } from '@/config/brand'
+import { BRAND, POWERED_BY } from '@/config/brand'
 import { go, href, useRoute } from '@/core/router'
 import { accessGuard, useBooks } from '@/core/store/context'
-import { Button, cls, Icon, Logo, useSheets, useToast } from '@/ui'
+import { BrandMark, Button, cls, Icon, Logo, useSheets, useToast } from '@/ui'
 import { Assistant } from './Assistant'
 import { BillingBar } from './BillingBar'
 import { BellButton, DesktopAlerts } from './Notifications'
@@ -88,7 +88,7 @@ export function Shell() {
         </a>
         <div className="side-tools"><BellButton dark /></div>
         <nav aria-label="Sections"><NavList current={current} /></nav>
-        <div className="powered">Powered by <b>{POWERED_BY}</b></div>
+        <div className="powered"><BrandMark size={18} /><span><b>{BRAND}</b> · by {POWERED_BY}</span></div>
         <Account />
       </aside>
 
@@ -106,7 +106,7 @@ export function Shell() {
       <main className="main">
         <BillingBar />
         <div className={cls('page', nav.motion, readonly && 'readonly')} key={pageKey}>
-          {readonly && <div className="view-only" role="note">View only. Your role cannot make changes on this screen.</div>}
+          {readonly && feature.id !== 'my-work' && <div className="view-only" role="note">View only. Your role cannot make changes on this screen.</div>}
           <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
             <Screen params={params} />
           </Suspense>

@@ -10,6 +10,7 @@ import { addSampleDelivery } from './sampleDelivery'
 import { addDays, addMonths, daysBetween, fmonth, parse, todayISO } from './format'
 import { defaultRoles } from './permissions'
 import type {
+  PartyDetails,
   Collection, Dealer, DealerTerms, Expense, MessageKind, TransportCostKind, TransportLink, Trip, TripStatus, Vehicle, Db, Employee, FactoryBill, FactoryOrder, FactoryOrderType, FactoryPayment, FactoryReceipt, Invoice, InvoiceLine, ISODate,
   MaterialGiven, Product, ProductKind, Purchase, ShipmentCost, SupplierPayment, SupplierTerms,
 } from './types'
@@ -152,15 +153,15 @@ export function demoDb(): Db {
   const cost = (ago: number, type: string, amount: number): ShipmentCost => ({ id: 'ic' + t(), ts, date: d(ago), type, amount, method: 'Bank transfer' })
   db.imports = [
     {
-      id: 'EXP-001', direction: 'export', ts: t(), supplier: '', country: 'Nepal', productId: 'pouch', productName: 'Soyabean oil 1 L pouch', qty: 200, unit: 'pouches',
+      id: 'EXP-001', direction: 'export', ts: t(), supplier: 'Kathmandu Traders Pvt. Ltd.', country: 'Nepal', productId: 'pouch', productName: 'Soyabean oil 1 L pouch', qty: 200, unit: 'pouches',
       lcNo: 'SC-2026-014', bank: '', usd: 420, rate: 122, costs: [], steps: { contract: { date: d(2) }, ready: {}, customs: {}, shipped: { expected: d(-9) }, paid: {} },
     },
     {
-      id: 'IMP-015', direction: 'import', ts: t(), supplier: '', country: 'China', productId: '', productName: 'Aerosol cans', qty: 10000, unit: 'pcs', lcNo: 'LC-2026-0471', bank: '', usd: 6500, rate: 122,
+      id: 'IMP-015', direction: 'import', ts: t(), supplier: 'Ningbo Huaxin Packaging Co.', country: 'China', productId: '', productName: 'Aerosol cans', qty: 10000, unit: 'pcs', lcNo: 'LC-2026-0471', bank: 'Islami Bank', usd: 6500, rate: 122,
       costs: [], steps: { lc: { date: d(4) }, shipped: { expected: d(-8) }, port: { expected: d(-30) }, customs: {}, warehouse: {} },
     },
     {
-      id: 'IMP-014', direction: 'import', ts: t(), supplier: '', country: 'Malaysia', productId: 'crude', productName: 'Crude soyabean oil', qty: 20000, unit: 'litres', lcNo: 'LC-2026-0457', bank: '', usd: 18000, rate: 122,
+      id: 'IMP-014', direction: 'import', ts: t(), supplier: 'Felda Vegetable Oil Sdn Bhd', country: 'Malaysia', productId: 'crude', productName: 'Crude soyabean oil', qty: 20000, unit: 'litres', lcNo: 'LC-2026-0457', bank: 'Dutch-Bangla Bank', usd: 18000, rate: 122,
       customs: {
         hsCode: '1507.10.00', port: 'Chattogram port', cnf: '', boeNo: 'C-184532', boeDate: d(4), container: 'MSKU 482915-3', av: 0,
         rates: { cd: 10, rd: 0, sd: 0, vat: 5, ait: 0, at: 0 }, freeUntil: d(1), demurragePerDay: 2400,
@@ -171,7 +172,7 @@ export function demoDb(): Db {
       steps: { lc: { date: d(33) }, shipped: { date: d(24) }, port: { date: d(5) }, customs: { expected: d(-3) }, warehouse: { expected: d(-4) } },
     },
     {
-      id: 'IMP-013', direction: 'import', ts: t(), supplier: '', country: 'India', productId: 'powder', productName: 'Coil powder mix', qty: 5000, unit: 'kg', lcNo: 'LC-2026-0432', bank: '', usd: 4200, rate: 122,
+      id: 'IMP-013', direction: 'import', ts: t(), supplier: 'Kolkata Agro Chem Pvt. Ltd.', country: 'India', productId: 'powder', productName: 'Coil powder mix', qty: 5000, unit: 'kg', lcNo: 'LC-2026-0432', bank: 'Sonali Bank', usd: 4200, rate: 122,
       costs: [cost(50, 'Sea freight', 38000), cost(38, 'Customs duty and VAT', 72600), cost(38, 'C&F agent', 12000), cost(37, 'Port charge', 6000), cost(36, 'Transport to warehouse', 7000)],
       steps: { lc: { date: d(62) }, shipped: { date: d(52) }, port: { date: d(40) }, customs: { date: d(37) }, warehouse: { expected: d(-1) } },
     },
@@ -185,7 +186,95 @@ export function demoDb(): Db {
     E('e3', 'Babul Mia', 'Driver', 'salary', 15000, 0, 300),
     E('e4', 'Jamal Uddin', 'Sales officer', 'sales', 0, 2, 410),
     E('e5', 'Rina Akter', 'Sales officer', 'sales', 0, 2, 200),
+    // workers: paid by the day, or by contract
+    { ...E('w1', 'Abul Kalam', 'Loader', 'daily', 0, 0, 160), kind: 'worker', dailyRate: 650, department: 'Warehouse' },
+    { ...E('w2', 'Sumon Mia', 'Packer', 'daily', 0, 0, 90), kind: 'worker', dailyRate: 600, department: 'Packing' },
+    { ...E('w3', 'Moni Begum', 'Machine helper', 'daily', 0, 0, 45), kind: 'worker', dailyRate: 550, department: 'Workshop' },
+    { ...E('w4', 'Rashed Electric Works', 'Electrician (contract)', 'contract', 0, 0, 25), kind: 'worker', department: 'Maintenance',
+      contract: { amount: 48000, start: d(25), end: d(-35), work: 'Godown wiring and lighting' } },
   ]
+  Object.assign(db.employees[0], { department: 'Accounts', nid: '1993261845207', emergency: 'Rafiq Sultan, 01711-883301', address: 'House 12, Road 4, Uttara, Dhaka' })
+  Object.assign(db.employees[1], { department: 'Warehouse', address: 'Tongi, Gazipur' })
+  Object.assign(db.employees[3], { department: 'Sales', salesTarget: 900000, address: 'Mirpur 10, Dhaka' })
+  Object.assign(db.employees[4], { department: 'Sales', salesTarget: 600000, address: 'Mohammadpur, Dhaka', extra: [{ label: 'Blood group', value: 'B+' }, { label: 'Motorbike', value: 'Dhaka Metro-HA 31-2297' }] })
+  let jh = 0
+  for (const e of db.employees) {
+    const pay = e.payType === 'sales' ? `${e.rate}% commission` : e.payType === 'daily' ? `${e.dailyRate} a day` : e.payType === 'contract' ? `contract ${e.contract?.amount}` : `${e.salary} a month`
+    e.status = 'active'
+    e.history = [{ id: 'jh' + ++jh, date: e.joined, kind: 'joined', text: `Joined as ${e.role}${e.department ? `, ${e.department}` : ''} · ${pay}` }]
+  }
+  db.employees[0].history!.push({ id: 'jh' + ++jh, date: d(340), kind: 'pay', text: 'Pay changed: 22,000 a month → 25,000 a month' }, { id: 'jh' + ++jh, date: d(120), kind: 'note', text: 'Finished VAT return training (NBR online)' })
+  db.employees[3].history!.push({ id: 'jh' + ++jh, date: d(200), kind: 'role', text: 'Job changed: Junior sales officer → Sales officer' }, { id: 'jh' + (jh + 1), date: d(60), kind: 'note', text: 'Best sales of the quarter, Dhaka north' })
+  // attendance for the workers and the warehouse keeper, the last 40 days (Fridays off)
+  db.attendance = []
+  let wd = 0
+  const jobs: Record<string, [string, number][]> = {
+    w1: [['Unloaded factory truck', 0], ['Loaded dealer van', 0], ['Stacked cartons in godown', 0]],
+    w2: [['Packed coil boxes', 180], ['Packed oil jars', 140], ['Labelled cartons', 220]],
+    w3: [['Ran filling machine', 0], ['Cleaned machine line', 0]],
+    e2: [['Received goods, checked challans', 0], ['Stock count', 0]],
+  }
+  for (let ago = 40; ago >= 0; ago--) {
+    const day = d(ago)
+    if (new Date(day + 'T00:00:00Z').getUTCDay() === 5) continue
+    for (const id of ['w1', 'w2', 'w3', 'e2']) {
+      const e = db.employees.find((x) => x.id === id)!
+      if (day < e.joined) continue
+      const roll = (ago * 7 + id.charCodeAt(1) * 13) % 23
+      const status = roll === 0 ? 'absent' : roll === 1 ? 'half' : roll === 2 && id === 'w3' ? 'leave' : 'present'
+      const [work, out] = jobs[id][ago % jobs[id].length]
+      db.attendance.push({ id: 'wd' + ++wd, date: day, employeeId: id, status, hours: status === 'present' ? 8 : status === 'half' ? 4 : undefined, work: status === 'present' || status === 'half' ? work : '', output: out && status !== 'absent' && status !== 'leave' ? Math.round(out * (status === 'half' ? 0.5 : 1)) : undefined })
+    }
+  }
+  // leave: one waiting for the office, one approved, one declined
+  db.leaveQuota = { casual: 10, sick: 14, annual: 20 }
+  db.leaveRequests = [
+    { id: 'LV-001', employeeId: 'e5', kind: 'casual', from: d(-3), to: d(-4) < d(-3) ? d(-3) : d(-4), reason: 'Cousin’s wedding in Cumilla', status: 'pending', askedAt: d(1) + 'T09:12:00.000Z', askedBy: 'Rina Akter' },
+    { id: 'LV-002', employeeId: 'w2', kind: 'sick', from: d(20), to: d(19), reason: 'Fever', status: 'approved', askedAt: d(21) + 'T07:40:00.000Z', askedBy: 'Office', decidedBy: 'Demo Owner', decidedAt: d(21) + 'T10:00:00.000Z', answer: 'Get well soon' },
+    { id: 'LV-003', employeeId: 'e4', kind: 'annual', from: d(-10), to: d(-14), reason: 'Family trip to Cox’s Bazar', status: 'declined', askedAt: d(3) + 'T11:00:00.000Z', askedBy: 'Demo Sales', decidedBy: 'Demo Owner', decidedAt: d(2) + 'T15:30:00.000Z', answer: 'Month-end collections that week — please pick the week after' },
+  ]
+  for (const day of [d(20), d(19)]) {
+    db.attendance = (db.attendance || []).filter((x) => !(x.employeeId === 'w2' && x.date === day))
+    db.attendance.push({ id: 'wd-lv2-' + day, date: day, employeeId: 'w2', status: 'leave', work: '', note: 'Sick leave · LV-002', leaveId: 'LV-002' })
+  }
+  // workplaces, where everyone is posted, and two transfers (one done, one coming)
+  db.workplaces = [
+    { id: 'wp1', name: 'Head office', kind: 'office', region: 'Dhaka', area: 'Motijheel', address: 'Suite 7B, Rahman Chamber, 12 Motijheel C/A, Dhaka 1000', headName: 'Demo Owner', phone: '02-9551234', hours: '9:30am–6pm, Friday off', note: '' },
+    { id: 'wp2', name: 'Tongi main godown', kind: 'warehouse', region: 'Dhaka', area: 'Tongi', address: 'Holding 41, Bscic Road, Tongi, Gazipur', headId: 'e2', phone: '01714-220981', hours: '8am–8pm, two shifts', note: 'Trucks unload at gate 2', siteId: 'wh1' },
+    { id: 'wp3', name: 'Chattogram depot', kind: 'warehouse', region: 'Chattogram', area: 'Pahartali', address: 'Shed 5, Sagorika Road, Pahartali, Chattogram', headName: 'Nurul Amin', phone: '01818-330417', hours: '8am–7pm', note: 'Mess room for staff from Dhaka', siteId: 'wh2' },
+    { id: 'wp4', name: 'Dhaka North sales region', kind: 'region', region: 'Dhaka', area: 'Uttara, Mirpur, Tongi, Gazipur', address: 'Sales desk at head office', headId: 'e4', phone: '', hours: 'Market days Sat–Thu', note: '' },
+    { id: 'wp5', name: 'Dhaka South sales region', kind: 'region', region: 'Dhaka', area: 'Jatrabari, Keraniganj, Narayanganj', address: 'Sales desk at head office', headName: '', phone: '', hours: 'Market days Sat–Thu', note: '' },
+  ]
+  Object.assign(db.workplaces[0], { lat: 23.7330, lng: 90.4172, radius: 150, startTime: '09:30', graceMin: 10 })
+  Object.assign(db.workplaces[1], { lat: 23.8913, lng: 90.4023, radius: 250, startTime: '08:00', graceMin: 15 })
+  Object.assign(db.workplaces[2], { lat: 22.3587, lng: 91.7832, radius: 250, startTime: '08:00', graceMin: 15 })
+  Object.assign(db.workplaces[3], { startTime: '09:30', graceMin: 15 })
+  Object.assign(db.workplaces[4], { startTime: '09:30', graceMin: 15 })
+  const posts: Record<string, string> = { e1: 'wp1', e2: 'wp2', e3: 'wp2', e4: 'wp5', e5: 'wp4', w1: 'wp2', w2: 'wp2', w3: 'wp2', w4: 'wp3' }
+  for (const e of db.employees) if (posts[e.id]) e.placeId = posts[e.id]
+  db.staffTransfers = [
+    { id: 'ST-001', employeeId: 'e4', from: 'wp5', to: 'wp4', date: d(200), orderNo: 'HR/2026/031', reason: 'Promoted to lead Dhaka North', newRole: 'Sales officer', note: '', by: 'Demo Owner', at: d(206) + 'T10:00:00.000Z' },
+    { id: 'ST-003', employeeId: 'e5', from: 'wp4', to: 'wp5', date: d(-14), orderNo: 'HR/2026/117', reason: 'Dhaka South needs a second sales officer', allowance: 2000, note: 'Hand over Dhaka North dealers to Jamal before you go', by: 'Demo Owner', at: d(0) + 'T09:00:00.000Z' },
+    { id: 'ST-002', employeeId: 'w1', from: 'wp2', to: 'wp3', date: d(-10), orderNo: 'HR/2026/114', reason: 'Chattogram depot needs a loader for import season', allowance: 3000, note: 'Report to Nurul Amin at 9am; mess room provided', by: 'Demo Owner', at: d(1) + 'T11:30:00.000Z' },
+  ]
+  db.employees.find((e) => e.id === 'e4')!.history!.push({ id: 'jh-st1', date: d(200), kind: 'transfer', text: 'Transferred from Dhaka South sales region to Dhaka North sales region (order HR/2026/031)' })
+  db.employees.find((e) => e.id === 'e5')!.history!.push({ id: 'jh-st3', date: d(-14), kind: 'transfer', text: 'Transferred from Dhaka North sales region to Dhaka South sales region (order HR/2026/117)' })
+  db.employees.find((e) => e.id === 'w1')!.history!.push({ id: 'jh-st2', date: d(-10), kind: 'transfer', text: 'Transferred from Tongi main godown to Chattogram depot (order HR/2026/114)' })
+  // the godown staff check in from their phones: times, and the odd late or off-site day
+  let k = 0
+  for (const a of db.attendance || []) {
+    if (a.leaveId || (a.status !== 'present' && a.status !== 'half')) continue
+    k++
+    const lateDay = k % 9 === 0
+    const inMin = 7 * 60 + 40 + (k * 7) % 25 + (lateDay ? 35 : 0)
+    const outMin = a.status === 'half' ? inMin + 240 : 17 * 60 + (k * 11) % 50
+    const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+    Object.assign(a, { inAt: hm(inMin), outAt: hm(outMin), source: 'self', lat: 23.8913, lng: 90.4023, distance: k % 13 === 0 ? 1850 : 20 + (k * 17) % 120, hours: Math.round(((outMin - inMin) / 60) * 4) / 4 })
+    // today they are still at work: checked in, not out yet
+    if (a.date === T) { delete a.outAt; delete a.hours }
+  }
+  // the electrician got an advance on the contract
+  db.payroll.push({ id: 'pr-w4', ts: t(), date: d(12), month: d(12).slice(0, 7), method: 'Cash', lines: [{ employeeId: 'w4', kind: 'contract', amount: 20000 }] })
 
   const D = (id: string, name: string, area: string, terms: DealerTerms, limit: number, days: number, salesId: string): Dealer =>
     ({ id, name, owner: '', phone: '', area, address: '', opening: 0, terms, limit, days, salesId })
@@ -209,6 +298,20 @@ export function demoDb(): Db {
     f1: ['Mizanur Rahman', '01715-338890'], f2: ['Delwar Hossain', '01819-447712'], f3: ['Shahidul Islam', '01712-905521'],
   }
   for (const x of [...db.suppliers, ...db.factories]) if (phones[x.id] && !x.phone) Object.assign(x, { contact: phones[x.id][0], phone: phones[x.id][1] })
+  // where each supplier and factory is, and the papers we keep for them
+  const places: Record<string, PartyDetails & { address: string }> = {
+    s1: { address: 'Shop 14, Moulvibazar Chemical Market', area: 'Chawkbazar', city: 'Dhaka', district: 'Dhaka', postCode: '1211', country: 'Bangladesh', email: 'easternchem@gmail.com', tradeLicense: 'DSCC-0241187', taxNo: 'BIN 000412398-0101', bank: 'Islami Bank, Moulvibazar branch, A/C 2050 1340 1002 3317' },
+    s2: { address: 'Khatunganj Road, 2nd floor, Rahman Market', area: 'Kotwali', city: 'Chattogram', district: 'Chattogram', postCode: '4000', country: 'Bangladesh', altPhone: '031-618422', taxNo: 'BIN 000538712-0203', bank: 'Dutch-Bangla Bank, Khatunganj, A/C 117 110 22891' },
+    s3: { address: 'Plot 22, BSCIC Industrial Estate', area: 'Tongi', city: 'Gazipur', district: 'Gazipur', postCode: '1710', country: 'Bangladesh', website: 'www.polyfab.com.bd', bank: 'bKash merchant 01911-760143' },
+    f1: { address: 'Holding 7, Dhaka–Chattogram Highway', area: 'Kanchpur', city: 'Narayanganj', district: 'Narayanganj', postCode: '1430', country: 'Bangladesh', email: 'shapla.chem@yahoo.com', tradeLicense: 'NCC-77810', taxNo: 'BIN 001122934-0402', note: 'Minimum run 500 boxes, 10–12 days lead time.' },
+    f2: { address: 'Sagorika Road, BSCIC area', area: 'Pahartali', city: 'Chattogram', district: 'Chattogram', postCode: '4219', country: 'Bangladesh', altPhone: '031-751906', taxNo: 'BIN 000874120-0201', bank: 'Sonali Bank, Pahartali, A/C 3318 0100 4471' },
+    f3: { address: 'Road 3, Patenga Industrial Zone', area: 'Patenga', city: 'Chattogram', district: 'Chattogram', postCode: '4204', country: 'Bangladesh', email: 'orders@patengapack.com' },
+  }
+  for (const x of [...db.suppliers, ...db.factories]) if (places[x.id] && !x.address) Object.assign(x, places[x.id])
+  db.warehouses = [
+    { id: 'wh1', name: 'Main godown', address: 'Holding 41, Bscic Road', area: 'Tongi', city: 'Gazipur', manager: 'Abdul Karim', phone: '01714-220981', capacity: '9,000 cartons', note: 'Trucks unload 8am–8pm', main: true },
+    { id: 'wh2', name: 'Chattogram depot', address: 'Shed 5, Sagorika Road', area: 'Pahartali', city: 'Chattogram', manager: 'Nurul Amin', phone: '01818-330417', capacity: '3,500 cartons', note: 'Imports from the port come here first' },
+  ]
   const staffPhones: Record<string, string> = { e1: '01711-120034', e2: '01811-450672', e4: '01712-660981', e5: '01913-284415' }
   for (const e of db.employees) if (staffPhones[e.id] && !e.phone) e.phone = staffPhones[e.id]
 
@@ -280,6 +383,16 @@ export function demoDb(): Db {
     const h = stockHistory(db, p.id)
     const low = Math.min(h.opening, ...h.moves.map((m) => m.balance))
     if (low < 0) p.stock -= low
+  }
+  // the Chattogram supplier delivers to the Chattogram depot, and part of it was trucked to the main godown
+  const ctg = db.purchases.filter((x) => x.supplierId === 's2').sort((a, b) => (a.date < b.date ? -1 : 1))
+  for (const x of ctg) x.siteId = 'wh2'
+  const lastCtg = ctg[ctg.length - 1]
+  if (lastCtg && lastCtg.date < T) {
+    db.stockTransfers = [{ id: 'TR-001', ts: t(), date: lastCtg.date < d(2) ? addDays(lastCtg.date, 1) : T, from: 'wh2', to: 'wh1', lines: [{ productId: lastCtg.productId, qty: Math.round(lastCtg.qty * 0.4) }], note: 'Covered van, Babul', by: 'Demo Owner' }]
+  }
+  for (const p of db.products) {
+    if (p.sources?.includes('factory')) p.factoryIds = [...new Set(db.factoryOrders.filter((o) => o.productId === p.id).map((o) => o.factoryId))]
   }
   // a new top-level object, so nothing cached while seeding is reused for the finished books
   return { ...db }

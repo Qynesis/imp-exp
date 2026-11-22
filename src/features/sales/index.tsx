@@ -4,7 +4,7 @@ import type { FeatureRouteProps } from '@/app/features'
 import { PageHead } from '@/components/PageHead'
 import { ScanBox } from '@/components/barcode/ScanBox'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, cls, DataTable, Field, Icon, Pill, Segmented, useConfirm, usePrint, useSheets, useToast } from '@/ui'
+import { Button, Card, cls, DataTable, Field, Icon, Pill, Segmented, useConfirm, usePrint, useSheets, useToast, SearchBox } from '@/ui'
 import { parcelDefaults, useCourier } from '@/features/courier/useCourier'
 import { InvoiceDoc } from './InvoiceDoc'
 import { InvoiceStatus } from './InvoiceStatus'
@@ -175,10 +175,14 @@ export default function SellPage({ params }: FeatureRouteProps) {
     }
   }
 
-  const recent = useMemo(
-    () => [...db.invoices].sort((a, b) => (a.status !== b.status ? (a.status === 'draft' ? -1 : 1) : newestFirst(a, b))).slice(0, 8),
-    [db],
-  )
+  const [invQ, setInvQ] = useState('')
+  // the latest few, or every bill that matches the search
+  const recent = useMemo(() => {
+    const n = invQ.trim().toLowerCase()
+    const all = [...db.invoices].sort((a, b) => (a.status !== b.status ? (a.status === 'draft' ? -1 : 1) : newestFirst(a, b)))
+    if (!n) return all.slice(0, 8)
+    return all.filter((i) => `${i.id} ${byId(db.dealers, i.dealerId)?.name || ''} ${i.status} ${i.date}`.toLowerCase().includes(n))
+  }, [db, invQ])
   const openInvoice = (inv: Invoice) => {
     if (inv.status !== 'draft') return sheets.open(ViewInvoiceSheet, { invoiceId: inv.id })
     setF(fromInvoice(inv))
@@ -326,7 +330,7 @@ export default function SellPage({ params }: FeatureRouteProps) {
           ]} />
       </Card>
 
-      <Card title="Recent invoices">
+      <Card title={invQ.trim() ? `Invoices matching “${invQ.trim()}” (${recent.length})` : 'Recent invoices'} action={<SearchBox value={invQ} onChange={setInvQ} placeholder="Bill no. or dealer" label="Search invoices" />}>
         <DataTable
             pageSize={25}
           rows={recent}

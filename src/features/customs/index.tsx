@@ -4,7 +4,7 @@ import type { FeatureRouteProps } from '@/app/features'
 import { PageHead } from '@/components/PageHead'
 import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
-import { Card, DataTable, Pill, Segmented, Stat } from '@/ui'
+import { Card, DataTable, Pill, Segmented, Stat, SearchBox } from '@/ui'
 import { CustomsCard } from './CustomsCard'
 
 type Filter = 'open' | 'done' | 'all'
@@ -15,7 +15,10 @@ export default function CustomsPage({ params: [id] }: FeatureRouteProps) {
   const [filter, setFilter] = useState<Filter>('open')
   const all = useMemo(() => db.imports.map((s) => ({ s, c: shipmentCalc(db, s), cc: customsCalc(db, s) })), [db])
   const open = all.filter((r) => !r.cc.released)
-  const rows = filter === 'open' ? open : filter === 'done' ? all.filter((r) => r.cc.released) : all
+  const [q, setQ] = useState('')
+  const n = q.trim().toLowerCase()
+  const rows = (filter === 'open' ? open : filter === 'done' ? all.filter((r) => r.cc.released) : all)
+    .filter((r) => !n || `${r.s.id} ${r.s.supplier} ${r.s.country} ${r.s.lcNo} ${r.c.productName} ${r.s.customs?.boeNo || ''}`.toLowerCase().includes(n))
   const picked = all.find((r) => r.s.id === id) || rows[0]
   const dutyDue = sum(open.filter((r) => !r.cc.dates.duty), (r) => r.cc.dutyTotal)
   const demurrage = sum(open, (r) => r.cc.demurrage)
@@ -31,8 +34,9 @@ export default function CustomsPage({ params: [id] }: FeatureRouteProps) {
         <Stat icon="clock" label="Demurrage running" value={tk(demurrage)} tone={demurrage > 0 ? 'warn' : undefined} sub={demurrage > 0 ? 'Free time has ended' : 'Nothing overdue'} />
       </div>
       <Card>
-        <div className="card-tools">
+        <div className="card-tools filter-bar">
           <Segmented<Filter> label="Which shipments" value={filter} onChange={setFilter} options={[{ value: 'open', label: 'In clearance' }, { value: 'done', label: 'Released' }, { value: 'all', label: 'All' }]} />
+          <SearchBox value={q} onChange={setQ} placeholder="Shipment, LC, B/E no. or item" label="Search shipments" />
         </div>
         <DataTable
             pageSize={25}

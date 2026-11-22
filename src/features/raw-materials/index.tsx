@@ -18,7 +18,7 @@ import { ProductSheet } from '@/features/products/sheets/ProductSheet'
 import { StockTabs } from '@/features/products/StockTabs'
 import { NewShipmentSheet } from '@/features/shipments/sheets/NewShipmentSheet'
 import { NewPurchaseSheet } from '@/features/suppliers/sheets/NewPurchaseSheet'
-import { Button, Card, cls, DataTable, IconBadge, Pill, Segmented, Stat, useSheets, type IconName } from '@/ui'
+import { Button, Card, cls, DataTable, IconBadge, Pill, Segmented, Stat, useSheets, type IconName, SearchBox } from '@/ui'
 
 const MATERIAL_KINDS: readonly ProductKind[] = ['raw', 'packaging']
 type KindFilter = 'all' | 'raw' | 'packaging' | 'low' | 'archived'
@@ -116,7 +116,7 @@ export default function RawMaterialsPage() {
               { value: 'low', label: `Low${lowCount ? ` (${lowCount})` : ''}` },
               ...(archivedCount || kind === 'archived' ? [{ value: 'archived' as const, label: `Archived (${archivedCount})` }] : []),
             ]} />
-            <input className="in search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Material name or code" aria-label="Search materials" />
+            <SearchBox value={q} onChange={setQ} placeholder="Material name or code" label="Search materials" />
           </div>
           {source && (
             <div className="card-body pt0 filter-note">

@@ -5,7 +5,7 @@ import { BUSINESS_TYPES, fdate, fmt, plural } from '@shared/domain'
 import { BRAND, POWERED_BY } from '@/config/brand'
 import { ApiError } from '@/core/api/client'
 import { useStore } from '@/core/store/context'
-import { Button, Card, DataTable, Empty, Logo, Pill, Stat, useConfirm, useToast } from '@/ui'
+import { Button, Card, DataTable, Empty, Logo, Pill, Stat, useConfirm, useToast, SearchBox } from '@/ui'
 
 /** The operator's view: every company on the platform, with a way into each one. */
 export default function PlatformPage() {
@@ -63,7 +63,7 @@ export default function PlatformPage() {
         <Stat icon="users" label="Users" value={list ? userCount : '…'} />
         <Stat icon="card" label="Payments to approve" value={list ? claimCount : '…'} tone={claimCount ? 'warn' : undefined} sub={claimCount ? 'Check each transaction ID, then approve' : 'Nothing waiting'} />
       </div>
-      <input className="in" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search company, user or email" aria-label="Search companies" />
+      <SearchBox value={q} onChange={setQ} placeholder="Search company, user or email" label="Search companies" />
       {list && !shown.length && <Card><Empty>{list.length ? 'No company matches.' : 'No company has signed up yet.'}</Empty></Card>}
       {shown.map((c) => (
         <Card key={c.id} className="co-card" title={c.name}

@@ -30,6 +30,10 @@ export interface StoreValue {
   platformSignOut(): void
   /** User management goes through the API because it owns the passwords. */
   users(method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query?: string): Promise<void>
+  /** The signed-in employee checks in or out (any role). */
+  attend(body: { op: 'in'; lat?: number; lng?: number } | { op: 'out'; work: string; output?: number }): Promise<void>
+  /** The signed-in employee asks for leave or withdraws a request (any role). */
+  leave(body: { op: 'request'; kind: string; from: string; to: string; half?: boolean; reason: string } | { op: 'cancel'; id: string }): Promise<void>
   /** Any other API call made as the signed-in user, e.g. courier booking. */
   call<T>(method: HttpMethod, path: string, body?: unknown): Promise<T>
 }

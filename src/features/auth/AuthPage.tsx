@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { StatusResponse } from '@shared/api/contract'
 import { BUSINESS_TYPES, type BusinessTypeId } from '@shared/domain'
 import { LangSwitch } from '@/components/LangSwitch'
-import { POWERED_BY } from '@/config/brand'
+import { BRAND, BRAND_LINE, POWERED_BY } from '@/config/brand'
 import { ApiError } from '@/core/api/client'
 import { useStore } from '@/core/store/context'
 import { Button, cls, Field, Icon, Logo, Segmented, useForm, type IconName } from '@/ui'
@@ -82,7 +82,7 @@ export default function AuthPage() {
         <ul className="auth-features">
           {AUTH_FEATURES.map(([icon, name]) => <li key={name}><span><Icon name={icon} size={22} /></span>{name}</li>)}
         </ul>
-        <span className="powered-auth">Powered by <b>{POWERED_BY}</b></span>
+        <span className="powered-auth"><b>{BRAND}</b> · {BRAND_LINE} · Powered by <b>{POWERED_BY}</b></span>
       </div>
       <form className="auth-card" onSubmit={submit} noValidate>
         <div className="auth-lang"><LangSwitch /></div>

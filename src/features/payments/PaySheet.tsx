@@ -57,7 +57,7 @@ export function PaySheet({ kind = 'supplier', supplierId, purchaseId, orderId, c
         <>
           <Field label="Supplier">
             <select {...bind('supplierId')}>
-              {db.suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {db.suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}{s.city ? ` · ${s.city}` : ''}</option>)}
             </select>
           </Field>
           <Field label="Against bill">

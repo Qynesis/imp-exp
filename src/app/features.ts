@@ -32,12 +32,15 @@ export interface FeatureDef {
 
 export const FEATURES: FeatureDef[] = [
   { id: 'dashboard', icon: 'home', label: 'Dashboard', tab: { label: 'Home' }, load: () => import('@/features/dashboard') },
+  // every person with a login linked to an employee: their own profile, read-only
+  { id: 'my-work', icon: 'badge', label: 'My work', tab: { label: 'Me' }, load: () => import('@/features/my-work') },
   { id: 'factory-orders', icon: 'factory', label: 'Factory orders', group: 'Buying', tab: { label: 'Orders' }, hasDetail: true, load: () => import('@/features/factory-orders') },
   { id: 'suppliers', icon: 'store', label: 'Suppliers', group: 'Buying', tab: { label: 'Suppliers' }, load: () => import('@/features/suppliers') },
   { id: 'imports', icon: 'ship', label: 'Shipments (LC)', group: 'Buying', tab: { label: 'Shipments' }, load: () => import('@/features/shipments') },
   { id: 'customs', icon: 'shield', label: 'Customs clearance', group: 'Buying', tab: { label: 'Customs' }, load: () => import('@/features/customs') },
   { id: 'products', icon: 'box', label: 'Products and stock', group: 'Stock', tab: { label: 'Stock' }, load: () => import('@/features/products') },
   { id: 'raw-materials', icon: 'layers', label: 'Raw materials', group: 'Stock', load: () => import('@/features/raw-materials') },
+  { id: 'warehouse', icon: 'building', label: 'Warehouse', group: 'Stock', load: () => import('@/features/warehouse') },
   { id: 'transport', icon: 'truck', label: 'Transport', group: 'Stock', load: () => import('@/features/transport') },
   { id: 'sell', icon: 'receipt', label: 'Sell to dealer', group: 'Selling', tab: { label: 'Sell' }, hasDetail: true, load: () => import('@/features/sales') },
   { id: 'dealers', icon: 'users', label: 'Dealers', group: 'Selling', tab: { label: 'Dealers' }, load: () => import('@/features/dealers') },
@@ -46,7 +49,8 @@ export const FEATURES: FeatureDef[] = [
   { id: 'courier', icon: 'parcel', label: 'Courier', group: 'Selling', load: () => import('@/features/courier') },
   { id: 'messages', icon: 'send', label: 'Messages', group: 'Selling', load: () => import('@/features/messages') },
   { id: 'cashbook', icon: 'wallet', label: 'Cashbook and dues', group: 'Money', tab: { label: 'Cash' }, load: () => import('@/features/cashbook') },
-  { id: 'employees', icon: 'badge', label: 'Employees', group: 'Money', load: () => import('@/features/employees') },
+  { id: 'employees', icon: 'badge', label: 'Employees and workers', group: 'Money', load: () => import('@/features/employees') },
+  { id: 'attendance', icon: 'calendar', label: 'Attendance', group: 'Money', load: () => import('@/features/attendance') },
   { id: 'expenses', icon: 'receipt', label: 'Expenses', group: 'Money', load: () => import('@/features/expenses') },
   { id: 'accounts', icon: 'layers', label: 'Accounts, tax and VAT', group: 'Money', load: () => import('@/features/accounts') },
   { id: 'fixed-assets', icon: 'building', label: 'Fixed assets', group: 'Money', load: () => import('@/features/fixed-assets') },
@@ -56,7 +60,7 @@ export const FEATURES: FeatureDef[] = [
 ]
 
 /** Which screens get a phone tab first, when the role can open them. Four tabs plus "More". */
-export const TAB_PRIORITY: PageId[] = ['dashboard', 'factory-orders', 'sell', 'cashbook', 'products', 'dealers', 'suppliers', 'imports', 'customs']
+export const TAB_PRIORITY: PageId[] = ['dashboard', 'my-work', 'factory-orders', 'sell', 'cashbook', 'products', 'dealers', 'suppliers', 'imports', 'customs']
 export const TAB_COUNT = 4
 
 export const featureById = (id: string): FeatureDef | undefined => FEATURES.find((f) => f.id === id)

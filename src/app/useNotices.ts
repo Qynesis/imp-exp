@@ -45,14 +45,15 @@ export function useNotices() {
   const state = useMemo(() => parse(raw), [raw])
 
   const list = useMemo(() => {
-    const out: Notice[] = notifications(db).filter((n) => level(n.page) !== 'none')
+    const myEmployee = db.users.find((u) => u.id === session.userId)?.employeeId || ''
+    const out: Notice[] = notifications(db).filter((n) => level(n.page) !== 'none' && (!n.forEmployee || n.forEmployee === myEmployee))
     const today = new Date().toISOString().slice(0, 10)
     if (billing && level('settings') !== 'none') {
       if (billing.status === 'expired') out.unshift({ id: 'billing:ended:' + billing.until, kind: 'accounts', tone: 'warn', rank: 100, page: 'settings', to: 'settings/billing', date: today, title: 'Your subscription has ended', body: 'The books are read-only until a plan is paid.' })
       else if (billing.status !== 'free' && billing.daysLeft <= 7) out.unshift({ id: `billing:soon:${billing.until}:${billing.daysLeft <= 3 ? 3 : 7}`, kind: 'accounts', tone: billing.daysLeft <= 3 ? 'warn' : 'info', rank: 90, page: 'settings', to: 'settings/billing', date: today, title: `${billing.status === 'trial' ? 'Free trial' : 'Your plan'} ends in ${billing.daysLeft} day${billing.daysLeft === 1 ? '' : 's'}`, body: 'Choose a plan to keep using the software without a break.' })
     }
     return out
-  }, [db, billing, level])
+  }, [db, billing, level, session.userId])
 
   const unread = list.filter((n) => !state.read[n.id])
   const markRead = useCallback((ids: string[]) => {

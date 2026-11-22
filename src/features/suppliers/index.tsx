@@ -1,15 +1,17 @@
 import { ClipButton } from '@/components/attachments/Attachments'
 import { useMemo, useState } from 'react'
-import { byId, fdate, fmt, supplierLedger, supplyRows, tk } from '@shared/domain'
+import { byId, fdate, fmt, fullAddress, supplierLedger, supplyRows, tk } from '@shared/domain'
 import { useSee } from '@/app/useSee'
 import { Hidden } from '@/components/Hidden'
 import type { FeatureRouteProps } from '@/app/features'
 import { CustomView } from '@/components/CustomFields'
 import { PageHead } from '@/components/PageHead'
+import { PartyView } from '@/components/PartyFields'
+import { PhoneLink } from '@/components/PhoneLink'
 import { go } from '@/core/router'
-import { useBooks } from '@/core/store/context'
+import { accessGuard, useBooks } from '@/core/store/context'
 import { PaySheet } from '@/features/payments/PaySheet'
-import { Button, Card, DataTable, Empty, cls, useSheets } from '@/ui'
+import { Button, Card, DataTable, Empty, cls, usePaged, useSheets, SearchBox } from '@/ui'
 import { AddSupplierSheet } from './sheets/AddSupplierSheet'
 import { NewPurchaseSheet } from './sheets/NewPurchaseSheet'
 import { SupplyOverviewSheet } from './sheets/SupplyOverviewSheet'
@@ -22,8 +24,9 @@ export default function SuppliersPage({ params: [id] }: FeatureRouteProps) {
   const [q, setQ] = useState('')
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    return db.suppliers.map((s) => supplierLedger(db, s.id)).filter((l) => (l.supplier.name + ' ' + l.supplier.goods).toLowerCase().includes(needle))
+    return db.suppliers.map((s) => supplierLedger(db, s.id)).filter((l) => (l.supplier.name + ' ' + l.supplier.goods + ' ' + fullAddress(l.supplier)).toLowerCase().includes(needle))
   }, [db, q])
+  const paged = usePaged(list, 15)
   const shownId = byId(db.suppliers, id) ? id : db.suppliers[0]?.id
   const led = shownId ? supplierLedger(db, shownId) : null
 
@@ -34,26 +37,25 @@ export default function SuppliersPage({ params: [id] }: FeatureRouteProps) {
           actions={
             <>
               <Button icon="layers" variant="secondary" onClick={() => sheets.open(SupplyOverviewSheet, {})}>What we buy, by supplier</Button>
-              <Button icon="plus" onClick={() => sheets.open(AddSupplierSheet)}>Add supplier</Button>
+              <Button icon="plus" onClick={() => sheets.open(AddSupplierSheet, {})}>Add supplier</Button>
             </>
           } />
       </div>
       <div className="md-grid">
         <Card className="md-list">
           <div className="card-body">
-            <label className="field">
-              <span className="field-label">Search suppliers</span>
-              <input className="in" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name or goods" />
-            </label>
+            <SearchBox value={q} onChange={setQ} placeholder="Name, goods or area" wide />
           </div>
           <div className="pick-list">
-            {list.map((l) => (
+            {paged.rows.map((l) => (
               <button key={l.supplier.id} type="button" className={cls('pick', l.supplier.id === shownId && 'active')} onClick={() => go('suppliers/' + l.supplier.id)}>
                 <b>{l.supplier.name}</b>
                 <span className="t-muted">{l.supplier.goods || 'No goods listed'}</span>
+                {(l.supplier.area || l.supplier.city) && <span className="t-muted">{[l.supplier.area, l.supplier.city].filter(Boolean).join(', ')}</span>}
                 {see.cost && <span className={l.due > 0 ? 't-warn strong' : 't-muted strong'}>{l.due > 0 ? `We owe ${tk(l.due)}` : 'Settled'}</span>}
               </button>
             ))}
+            {paged.pager}
             {!list.length && <Empty>{db.suppliers.length ? 'No supplier matches that search.' : 'No suppliers yet.'}</Empty>}
           </div>
         </Card>
@@ -70,7 +72,8 @@ function SupplierDetail({ led, onNewPurchase, onPay }: { led: ReturnType<typeof 
   const supply = supplyRows(db, led.supplier.id)
   const m = (n: number) => (see.cost ? tk(n) : <Hidden />)
   const s = led.supplier
-  const contact = [s.contact, s.phone, s.address].filter(Boolean).join(' · ')
+  const sheets = useSheets()
+  const addr = fullAddress(s)
   return (
     <div className="md-detail stack">
       <a className="back-link only-mobile" href="#/suppliers">‹ All suppliers</a>
@@ -81,11 +84,13 @@ function SupplierDetail({ led, onNewPurchase, onPay }: { led: ReturnType<typeof 
               <h2 className="h-lg">{s.name}</h2>
               <p className="t-muted tight">
                 {s.goods || 'No goods listed'} · {s.terms === 'credit' ? `Credit terms: ${s.days} days` : 'Cash terms'}
-                {contact && <><br />{contact}</>}
+                {(s.contact || s.phone) && <><br />{s.contact}{s.contact && s.phone ? ' · ' : ''}<PhoneLink phone={s.phone} label={s.name} /></>}
+                {addr && <><br />{addr}</>}
                 <br /><CustomView entity="supplier" record={s} inline />
               </p>
             </div>
             <div className="page-actions">
+              {!accessGuard.readonly && <Button icon="edit" variant="secondary" onClick={() => sheets.open(AddSupplierSheet, { supplierId: s.id })}>Edit details</Button>}
               <Button icon="cart" variant="secondary" onClick={onNewPurchase}>New purchase</Button>
               {see.cost && <Button icon="wallet" disabled={led.due <= 0} onClick={onPay}>Pay supplier</Button>}
             </div>
@@ -97,6 +102,9 @@ function SupplierDetail({ led, onNewPurchase, onPay }: { led: ReturnType<typeof 
             <div><span>We owe</span><b className={led.due > 0 ? 't-warn' : ''}>{m(led.due)}</b></div>
           </div>
         </div>
+      </Card>
+      <Card icon="pin" title="Contact, address and papers" sub={s.note || undefined}>
+        <div className="card-body"><PartyView p={s} name={s.name} /></div>
       </Card>
       <Card icon="box" title="Items from this supplier" sub="What they send us, how much, and at what price.">
         <DataTable rows={supply} rowKey={(r) => r.productId} empty="Nothing bought from this supplier yet."

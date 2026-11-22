@@ -9,7 +9,7 @@
 
 /* ---------- nav ---------- */
 .ld-nav { position: fixed; inset: 0 0 auto 0; z-index: 90; display: flex; align-items: center; gap: 24px; padding: 14px clamp(16px, 4vw, 48px); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid transparent; }
-.ld-brand { display: inline-flex; background: #fff; border-radius: 10px; padding: 4px 8px; }
+.ld-brand { display: inline-flex; text-decoration: none; }
 .ld-nav nav { display: flex; gap: 4px; margin: 0 auto; }
 .ld-nav nav button { background: none; border: 0; color: var(--ld-muted); font: 500 15px var(--font); padding: 8px 14px; border-radius: 999px; cursor: pointer; transition: color 0.2s, background 0.2s; }
 .ld-nav nav button:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
@@ -174,7 +174,7 @@
 .ld-closing h2 { font: 700 clamp(32px, 5vw, 58px)/1.05 var(--display, var(--font)); margin: 0 0 14px; color: #fff; letter-spacing: -0.02em; }
 .ld-closing p { color: var(--ld-muted); font-size: 18px; margin: 0; }
 .ld-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 30px clamp(16px, 5vw, 72px) 40px; border-top: 1px solid var(--ld-line); color: var(--ld-muted); font-size: 14px; }
-.ld-foot > :first-child { background: #fff; border-radius: 8px; padding: 3px 6px; }
+.ld-foot > :first-child { display: inline-flex; }
 .ld-foot-links { display: flex; gap: 20px; }
 .ld-foot-links a { text-decoration: none; }
 .ld-foot-links a:hover { color: #fff; }

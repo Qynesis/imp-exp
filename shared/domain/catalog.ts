@@ -52,6 +52,7 @@ export const CUSTOM_ENTITIES: Record<CustomEntity, string> = {
   dealer: 'Dealers',
   shipment: 'Shipments',
   factoryOrder: 'Factory orders',
+  employee: 'Employees and workers',
 }
 export const FIELD_TYPES: Record<FieldType, string> = { text: 'Text', number: 'Number', date: 'Date', select: 'Choice from a list' }
 

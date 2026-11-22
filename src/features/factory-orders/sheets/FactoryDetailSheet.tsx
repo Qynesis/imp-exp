@@ -1,6 +1,7 @@
-import { factoryRows, fdate, fmt, foCalc, tk } from '@shared/domain'
+import { factoryRows, fullAddress, fdate, fmt, foCalc, tk } from '@shared/domain'
 import { useSee } from '@/app/useSee'
 import { Hidden } from '@/components/Hidden'
+import { PartyView } from '@/components/PartyFields'
 import { PhoneLink } from '@/components/PhoneLink'
 import { go } from '@/core/router'
 import { accessGuard, useBooks } from '@/core/store/context'
@@ -31,7 +32,7 @@ export const FactoryDetailSheet: SheetComponent<{ factoryId: string }> = ({ fact
         </>
       ) : undefined}>
       <p className="t-muted tight">{[f.contact, f.makes].filter(Boolean).join(' · ')} <PhoneLink phone={f.phone} label={f.name} />{f.email ? ` · ${f.email}` : ''}</p>
-      {f.address && <p className="t-muted tight">{f.address}</p>}
+      {fullAddress(f) && <p className="t-muted tight">{fullAddress(f)}</p>}
       <div className="mini-stats">
         <div><span>Orders</span><b>{row.orders}</b><small className="t-muted">{row.open} open · last {row.lastOrder ? fdate(row.lastOrder) : '—'}</small></div>
         <div><span>Still to come</span><b>{fmt(row.pendingQty)}</b><small className="t-muted">units on open orders</small></div>
@@ -47,6 +48,8 @@ export const FactoryDetailSheet: SheetComponent<{ factoryId: string }> = ({ fact
           { label: 'Rate', align: 'right', render: (x) => money(x.o.rate) },
           { label: 'Status', align: 'right', render: (x) => <Pill tone={x.c.tone}>{x.c.status}</Pill> },
         ]} />
+      <h3 className="sheet-h">Contact, address and papers</h3>
+      <PartyView p={f} name={f.name} />
       {f.note && <p className="t-muted">{f.note}</p>}
     </Sheet>
   )

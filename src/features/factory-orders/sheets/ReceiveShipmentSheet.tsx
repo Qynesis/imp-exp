@@ -1,8 +1,9 @@
-import { byId, fmt, foCalc, num, todayISO, tk, tripCalc, trips } from '@shared/domain'
+import { byId, fmt, foCalc, num, todayISO, tk, tripCalc, trips, siteStock } from '@shared/domain'
 import { MethodSelect } from '@/components/MethodSelect'
 import { ScanBox } from '@/components/barcode/ScanBox'
 import { useBooks } from '@/core/store/context'
 import { LabelsSheet } from '@/features/products/sheets/LabelsSheet'
+import { SitePicker } from '@/components/SitePicker'
 import { Field, FormSheet, Segmented, useForm, useSheets, useToast } from '@/ui'
 
 type FreightMode = 'none' | 'in' | 'out'
@@ -16,7 +17,7 @@ export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
   const { db, act } = useBooks()
   const sheets = useSheets()
   const toast = useToast()
-  const [v, set, bind, nbind] = useForm({ date: todayISO(), challan: '', qty: '', damaged: '', note: '', freightMode: 'none' as FreightMode, freight: '', method: 'Cash', labels: '' })
+  const [v, set, bind, nbind] = useForm({ siteId: siteStock(db).mainId, date: todayISO(), challan: '', qty: '', damaged: '', note: '', freightMode: 'none' as FreightMode, freight: '', method: 'Cash', labels: '' })
   const o = byId(db.factoryOrders, orderId)
   if (!o) return null
   const c = foCalc(db, o)
@@ -35,7 +36,7 @@ export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
         if (qty <= 0) return 'Enter the quantity received.'
         if (qty > c.pending) return `Only ${fmt(c.pending)} ${c.unit} are still pending on this order. Change the order first if the factory sent more.`
         if (v.freightMode !== 'none' && freight <= 0) return 'Enter the freight paid, or choose No freight.'
-        act('receiveShipment', { orderId, date: v.date, challan: v.challan.trim(), qty, damaged: num(v.damaged), note: v.note.trim(), freight, freightInCost: v.freightMode === 'in', method: v.method })
+        act('receiveShipment', { orderId, date: v.date, challan: v.challan.trim(), qty, damaged: num(v.damaged), note: v.note.trim(), freight, freightInCost: v.freightMode === 'in', method: v.method, siteId: v.siteId || undefined })
         if (v.labels === 'yes') {
           const p = db.products.find((x) => x.id === o.productId)
           const cartons = p?.perCarton ? Math.ceil(qty / p.perCarton) : 0
@@ -52,6 +53,7 @@ export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
         }} />
       </div>
       <Field label="Date received"><input type="date" {...bind('date')} /></Field>
+      <SitePicker db={db} bind={bind('siteId')} />
       <Field label="Challan number"><input {...bind('challan')} placeholder="e.g. CH-320" /></Field>
       <Field label={`Good quantity received (${c.unit})`}><input {...nbind('qty')} placeholder={`Up to ${fmt(c.pending)}`} /></Field>
       <Field label="Damaged or rejected" hint="Recorded on the challan, not added to stock."><input {...nbind('damaged')} placeholder="0" /></Field>

@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
-import { byId, ESTIMATE_STATUS, factoryRows, fdate, fmt, foCalc, tk } from '@shared/domain'
+import { byId, ESTIMATE_STATUS, factoryRows, fdate, fmt, foCalc, tk, fullAddress } from '@shared/domain'
 import { useSee } from '@/app/useSee'
 import { Hidden } from '@/components/Hidden'
 import { PageHead } from '@/components/PageHead'
 import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, Pill, Segmented, useSheets } from '@/ui'
+import { Button, Card, DataTable, Pill, Segmented, useSheets, SearchBox } from '@/ui'
 import { AddFactorySheet } from './sheets/AddFactorySheet'
 import { FactoryDetailSheet } from './sheets/FactoryDetailSheet'
 import { ESTIMATE_TONE } from './estimateTone'
@@ -74,7 +74,7 @@ export function FactoryOrdersPage() {
                 <option value="1">Type 1 · raw material supplied</option>
                 <option value="2">Type 2 · direct order</option>
               </select>
-              <input className="in search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Order, factory or product" aria-label="Search orders" />
+              <SearchBox value={q} onChange={setQ} placeholder="Order, factory or product" label="Search orders" />
             </div>
           </div>
           <DataTable
@@ -120,18 +120,19 @@ function FactoriesList() {
   const see = useSee()
   const [q, setQ] = useState('')
   const [showOld, setShowOld] = useState(false)
-  const rows = factoryRows(db).filter((r) => (showOld || !r.factory.archived) && (!q || `${r.factory.name} ${r.factory.contact} ${r.factory.makes} ${r.products.join(' ')}`.toLowerCase().includes(q.toLowerCase())))
+  const rows = factoryRows(db).filter((r) => (showOld || !r.factory.archived) && (!q || `${r.factory.name} ${r.factory.contact} ${fullAddress(r.factory)} ${r.factory.makes} ${r.products.join(' ')}`.toLowerCase().includes(q.toLowerCase())))
   return (
     <Card icon="factory" title="Factories" sub="Tap a factory for its details, orders and balance."
       action={<Button size="sm" icon="plus" onClick={() => sheets.open(AddFactorySheet, {})}>Add factory</Button>}>
       <div className="card-body tools-row">
         <label className="check"><input type="checkbox" checked={showOld} onChange={(e) => setShowOld(e.target.checked)} /> Show factories not in use</label>
-        <div className="tools-right"><input className="in search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Factory, person or product" aria-label="Search factories" /></div>
+        <div className="tools-right"><SearchBox value={q} onChange={setQ} placeholder="Factory, person or product" label="Search factories" /></div>
       </div>
       <DataTable rows={rows} rowKey={(r) => r.factory.id} pageSize={20} onRow={(r) => sheets.open(FactoryDetailSheet, { factoryId: r.factory.id })}
         empty="No factories yet. Add the factories that make goods for you."
         columns={[
           { label: 'Factory', primary: true, render: (r) => <span className="two-line"><b>{r.factory.name}{r.factory.archived ? ' (not in use)' : ''}</b><small className="t-muted">{[r.factory.contact, r.factory.phone].filter(Boolean).join(' · ')}</small></span> },
+          { label: 'Address', render: (r) => <span className="t-muted">{fullAddress(r.factory) || 'No address yet'}</span> },
           { label: 'Makes for us', render: (r) => <span className="t-muted">{r.products.join(', ') || r.factory.makes || '—'}</span> },
           { label: 'Orders', align: 'right', render: (r) => <span className="two-line right"><b>{r.orders}</b>{r.open > 0 && <small className="t-warn">{r.open} open</small>}</span> },
           { label: 'Still to come', align: 'right', render: (r) => (r.pendingQty ? r.pendingQty.toLocaleString('en-IN') : '—') },

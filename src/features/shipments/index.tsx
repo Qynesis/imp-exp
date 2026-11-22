@@ -1,6 +1,6 @@
 import { useSee } from '@/app/useSee'
 import { Hidden } from '@/components/Hidden'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { byId, fdate, fmt, fshort, shipmentCalc, stepLabel, tk, todayISO, type Shipment, type ShipmentCalc, type StepKey } from '@shared/domain'
 import type { FeatureRouteProps } from '@/app/features'
 import { CustomView } from '@/components/CustomFields'
@@ -9,7 +9,7 @@ import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
 import { CustomsCard } from '@/features/customs/CustomsCard'
 import { TripSheet } from '@/features/transport/sheets/TripSheet'
-import { Button, Card, DataTable, Pill, useConfirm, useSheets, useToast } from '@/ui'
+import { Button, Card, DataTable, Pill, Segmented, useConfirm, useSheets, useToast, SearchBox } from '@/ui'
 import { AddCostSheet } from './sheets/AddCostSheet'
 import { NewShipmentSheet } from './sheets/NewShipmentSheet'
 
@@ -18,14 +18,25 @@ export default function ShipmentsPage({ params: [id] }: FeatureRouteProps) {
   const see = useSee()
   const { db } = useBooks()
   const sheets = useSheets()
-  const rows = useMemo(() => db.imports.map((s) => ({ ...s, c: shipmentCalc(db, s) })), [db])
+  const [q, setQ] = useState('')
+  const [dir, setDir] = useState<'all' | 'import' | 'export'>('all')
+  const rows = useMemo(() => {
+    const n = q.trim().toLowerCase()
+    return db.imports.map((s) => ({ ...s, c: shipmentCalc(db, s) }))
+      .filter((s) => (dir === 'all' || (dir === 'export' ? s.direction === 'export' : s.direction !== 'export')) && (!n || `${s.id} ${s.supplier} ${s.country} ${s.lcNo} ${s.c.productName} ${s.c.status}`.toLowerCase().includes(n)))
+  }, [db, q, dir])
   const shown = byId(db.imports, id) || db.imports.find((s) => s.direction !== 'export') || db.imports[0]
 
   return (
     <>
       <PageHead title="Shipments" sub="Imports and exports through LC or contract, with every cost added up to the true landed cost or export margin."
         actions={<Button icon="plus" onClick={() => sheets.open(NewShipmentSheet)}>New shipment</Button>} />
-      <Card title="All shipments">
+      <Card title="All shipments" action={
+        <div className="tools-right">
+          <Segmented label="Direction" value={dir} onChange={setDir} options={[{ value: 'all', label: 'All' }, { value: 'import', label: 'Imports' }, { value: 'export', label: 'Exports' }]} />
+          <SearchBox value={q} onChange={setQ} placeholder="Shipment, LC, supplier, item" label="Search shipments" />
+        </div>
+      }>
         <DataTable
             pageSize={25}
           rows={rows}

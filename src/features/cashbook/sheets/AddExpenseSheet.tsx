@@ -9,7 +9,7 @@ import { Field, FormSheet, useForm, useToast } from '@/ui'
 export function AddExpenseSheet({ head = 'Transport' }: { head?: string }) {
   const { db, act } = useBooks()
   const toast = useToast()
-  const staff = db.employees.filter((e) => e.payType === 'salary')
+  const staff = db.employees.filter((e) => (e.payType === 'salary' || e.payType === 'daily') && e.status !== 'left')
   const [v, , bind, nbind] = useForm({ head, details: '', employeeId: staff[0]?.id || '', amount: '', method: 'Cash', date: todayISO() })
   const [files, setFiles] = useState<Attachment[]>([])
   const advance = v.head === SALARY_ADVANCE

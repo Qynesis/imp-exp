@@ -3,7 +3,7 @@ import { fdate, fmonth, fmt, investorRows, profitPool, tk, type ProfitDistributi
 import { PageHead } from '@/components/PageHead'
 import { PhoneLink } from '@/components/PhoneLink'
 import { accessGuard, useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, Pill, Segmented, Stat, useConfirm, useSheets, useToast } from '@/ui'
+import { Button, Card, DataTable, Pill, Segmented, Stat, useConfirm, useSheets, useToast, SearchBox } from '@/ui'
 import { DistributeSheet } from './sheets/DistributeSheet'
 import { InvestorMoneySheet } from './sheets/InvestorMoneySheet'
 import { InvestorSheet } from './sheets/InvestorSheet'
@@ -20,7 +20,8 @@ export default function InvestorsPage() {
   const [show, setShow] = useState<Show>('active')
   const pool = profitPool(db)
   const all = investorRows(db)
-  const rows = all.filter((r) => show === 'all' || r.investor.status === show)
+  const [q, setQ] = useState('')
+  const rows = all.filter((r) => (show === 'all' || r.investor.status === show) && (!q.trim() || `${r.investor.name} ${r.investor.phone || ''}`.toLowerCase().includes(q.trim().toLowerCase())))
   const dists = [...(db.distributions || [])].reverse()
   const canEdit = !accessGuard.readonly
   const last12 = pool.months.slice(-12)
@@ -47,7 +48,7 @@ export default function InvestorsPage() {
         <Stat icon="wallet" label="Total invested capital" value={tk(pool.capital)} sub={`${all.filter((r) => r.investor.status === 'active').length} active investor${all.length === 1 ? '' : 's'}`} />
       </div>
 
-      <Card icon="users" title="Investor list" action={<Segmented<Show> label="Show" value={show} onChange={setShow} options={[{ value: 'active', label: 'Active' }, { value: 'exited', label: 'Left' }, { value: 'all', label: 'All' }]} />}>
+      <Card icon="users" title="Investor list" action={<div className="tools-right"><Segmented<Show> label="Show" value={show} onChange={setShow} options={[{ value: 'active', label: 'Active' }, { value: 'exited', label: 'Left' }, { value: 'all', label: 'All' }]} /><SearchBox value={q} onChange={setQ} placeholder="Investor name or phone" label="Search investors" /></div>}>
         <DataTable pageSize={20} rows={rows} rowKey={(r) => r.investor.id} onRow={(r) => sheets.open(InvestorStatementSheet, { investorId: r.investor.id })}
           empty={show === 'exited' ? 'No investor has left.' : 'No investors added yet.'}
           columns={[

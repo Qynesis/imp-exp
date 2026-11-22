@@ -13,6 +13,8 @@ export type Tone = 'good' | 'warn' | 'info' | 'neutral' | 'muted'
 /* ---------- access ---------- */
 export type PageId =
   | 'dashboard'
+  | 'my-work'
+  | 'attendance'
   | 'factory-orders'
   | 'raw-materials'
   | 'sales-analytics'
@@ -29,6 +31,7 @@ export type PageId =
   | 'cashbook'
   | 'employees'
   | 'fixed-assets'
+  | 'warehouse'
   | 'expenses'
   | 'accounts'
   | 'investors'
@@ -77,7 +80,7 @@ export interface Company {
 }
 
 /* ---------- custom fields ---------- */
-export type CustomEntity = 'product' | 'supplier' | 'dealer' | 'shipment' | 'factoryOrder'
+export type CustomEntity = 'product' | 'supplier' | 'dealer' | 'shipment' | 'factoryOrder' | 'employee'
 export type FieldType = 'text' | 'number' | 'date' | 'select'
 export type BusinessTypeId = 'general' | 'food' | 'machinery' | 'electronics' | 'toys' | 'medical'
 
@@ -122,6 +125,10 @@ export interface Product {
   sources?: ProductSource[]
   /** Suppliers we usually buy this from. */
   supplierIds?: string[]
+  /** Factories that usually make this. */
+  factoryIds?: string[]
+  /** Overseas suppliers we usually import this from, by name. */
+  importFrom?: string[]
   /** Materials and packaging needed for one unit. */
   recipe?: RecipeLine[]
   /** Hidden from lists and pickers, kept for history. */
@@ -158,17 +165,63 @@ export interface Dated {
   ts: number
 }
 
+/* ---------- people we buy from: full details ---------- */
+/** Contact, address, registration and bank details shared by suppliers and factories. All optional, missing in older books. */
+export interface PartyDetails {
+  altPhone?: string
+  email?: string
+  website?: string
+  /** Area, thana or upazila. */
+  area?: string
+  city?: string
+  district?: string
+  country?: string
+  postCode?: string
+  /** Trade licence number. */
+  tradeLicense?: string
+  /** BIN / VAT / tax registration. */
+  taxNo?: string
+  /** Bank name, account name and number, branch, routing; or a bKash/Nagad number. */
+  bank?: string
+  note?: string
+}
+
+/** A warehouse or godown where goods are received and kept. */
+export interface WarehouseSite {
+  id: string
+  name: string
+  address: string
+  area: string
+  city: string
+  manager: string
+  phone: string
+  /** How much it holds, as people say it: "8,000 cartons", "12,000 sq ft". */
+  capacity: string
+  note: string
+  /** The main warehouse, shown first and printed on challans. */
+  main?: boolean
+}
+/** Goods moved from one of our warehouses to another. */
+export interface StockTransfer {
+  id: string
+  ts: number
+  date: ISODate
+  from: string
+  to: string
+  lines: { productId: string; qty: number }[]
+  /** Vehicle, driver, challan… */
+  note: string
+  by: string
+}
+
 /* ---------- factory orders ---------- */
-export interface Factory {
+export interface Factory extends PartyDetails {
   id: string
   name: string
   contact: string
   phone: string
   address: string
   makes: string
-  /** Missing in older books. */
-  email?: string
-  note?: string
   /** No longer used: kept for history, left out of pickers. */
   archived?: boolean
 }
@@ -183,6 +236,8 @@ export interface FactoryReceipt extends Dated {
   freight?: number
   /** True when the freight is added into the product's cost per unit; false keeps it as a plain expense. */
   freightInCost?: boolean
+  /** Warehouse it went into; missing means the main one. */
+  siteId?: string
 }
 /** A change to an order while the factory is still working on it. */
 export interface OrderAmendment extends Dated {
@@ -269,7 +324,7 @@ export interface FactoryOrder {
 
 /* ---------- suppliers ---------- */
 export type SupplierTerms = 'credit' | 'cash'
-export interface Supplier {
+export interface Supplier extends PartyDetails {
   id: string
   name: string
   contact: string
@@ -291,6 +346,8 @@ export interface Purchase extends Dated {
   terms: SupplierTerms
   /** Input VAT or tax charged by the supplier, on top of qty × rate. */
   tax?: number
+  /** Warehouse it went into; missing means the main one. */
+  siteId?: string
 }
 export interface SupplierPayment extends Dated {
   id: string
@@ -357,6 +414,8 @@ export interface Shipment {
   customs?: CustomsInfo
   /** Cost per unit of exported goods, fixed when they leave the warehouse. */
   unitCost?: number
+  /** Warehouse imported goods went into; missing means the main one. */
+  siteId?: string
   custom?: CustomValues
 }
 
@@ -611,7 +670,125 @@ export interface Advance extends Dated {
   attachments?: Attachment[]
 }
 
-export type PayType = 'salary' | 'sales'
+/** Monthly salary, commission on sales, a wage for each day worked, or a fixed sum for a contract. */
+export type PayType = 'salary' | 'sales' | 'daily' | 'contract'
+/** Office and sales staff, or workers (factory floor, loading, labour). */
+export type StaffKind = 'staff' | 'worker'
+export interface WorkContract {
+  /** Total agreed for the job. */
+  amount: number
+  start: ISODate
+  end: ISODate
+  /** What the contract covers, e.g. "Loading 40 containers", "Godown painting". */
+  work: string
+}
+/** One line of someone's job history: joined, promoted, pay changed, moved, warned, left… */
+export interface JobEvent {
+  id: string
+  date: ISODate
+  kind: 'joined' | 'role' | 'pay' | 'department' | 'contract' | 'note' | 'left' | 'rejoined' | 'transfer'
+  text: string
+}
+/** Where people work: an office, a warehouse, a factory floor, a sales region or a branch. */
+export type PlaceKind = 'office' | 'warehouse' | 'factory' | 'region' | 'branch' | 'other'
+export interface WorkPlace {
+  id: string
+  name: string
+  kind: PlaceKind
+  /** Division or region, e.g. Dhaka, Chattogram. */
+  region: string
+  /** Areas a sales region covers, or the area the place is in. */
+  area: string
+  address: string
+  /** The person in charge, from the employees; or a name when they are not on the books. */
+  headId?: string
+  headName?: string
+  phone: string
+  /** Working hours, shift, weekly off. */
+  hours: string
+  note: string
+  /** The warehouse this place is, when it is one of ours. */
+  siteId?: string
+  /** Where it is on the map, and how close counts as "at work" for check-in (metres). */
+  lat?: number
+  lng?: number
+  radius?: number
+  /** Work starts at "HH:MM"; check-ins after start + grace are late. */
+  startTime?: string
+  graceMin?: number
+  archived?: boolean
+}
+/** An order moving someone to another workplace from a date. */
+export interface StaffTransfer {
+  id: string
+  employeeId: string
+  /** Where they worked before; empty for a first posting. */
+  from: string
+  to: string
+  /** The day they start at the new place. */
+  date: ISODate
+  /** Office order or letter number. */
+  orderNo: string
+  reason: string
+  /** New job title from that day, when it changes. */
+  newRole?: string
+  /** One-time transfer or travel allowance. */
+  allowance?: number
+  note: string
+  by: string
+  at: string
+  cancelled?: boolean
+}
+/** Leave an employee asks for; the admin approves or declines it. */
+export type LeaveKind = 'casual' | 'sick' | 'annual' | 'unpaid' | 'other'
+export interface LeaveRequest {
+  id: string
+  employeeId: string
+  kind: LeaveKind
+  from: ISODate
+  to: ISODate
+  /** Half of one day only. */
+  half?: boolean
+  reason: string
+  status: 'pending' | 'approved' | 'declined' | 'cancelled'
+  /** When asked, and who asked (user name). */
+  askedAt: string
+  askedBy: string
+  /** Who approved or declined, when, and what they said. */
+  decidedBy?: string
+  decidedAt?: string
+  answer?: string
+}
+/** A day in the attendance register. */
+export type DayStatus = 'present' | 'half' | 'absent' | 'leave'
+export interface WorkDay {
+  id: string
+  date: ISODate
+  employeeId: string
+  status: DayStatus
+  /** Hours on the job, when tracked. */
+  hours?: number
+  /** What they did that day. */
+  work: string
+  /** Pieces, cartons, bags… done that day, when work is counted. */
+  output?: number
+  note?: string
+  /** Set when the day comes from approved leave. */
+  leaveId?: string
+  /** Check-in and check-out, local time "HH:MM". */
+  inAt?: string
+  outAt?: string
+  /** Who marked it: the person themselves (check-in) or the office. */
+  source?: 'self' | 'office'
+  /** Where they checked in from, and whether that was at their workplace. */
+  lat?: number
+  lng?: number
+  /** Metres from the workplace, when both are known. */
+  distance?: number
+  /** Who last changed the day by hand, and when. */
+  editedBy?: string
+  editedAt?: string
+}
 export interface Employee {
   id: string
   name: string
@@ -630,10 +807,25 @@ export interface Employee {
   nid?: string
   emergency?: string
   note?: string
+  /** Staff or worker; missing means staff. */
+  kind?: StaffKind
+  /** Wage for one full day (daily pay). */
+  dailyRate?: number
+  contract?: WorkContract
+  /** Still working here, or left on `leftOn`. */
+  status?: 'active' | 'left'
+  leftOn?: ISODate
+  /** Extra details only this person has, added on the spot: "Blood group: B+", "Licence no.: …". */
+  extra?: { label: string; value: string }[]
+  /** Values of the company's own employee fields (Settings → custom fields). */
+  custom?: CustomValues
+  history?: JobEvent[]
+  /** First workplace, before any transfer order. */
+  placeId?: string
 }
 export interface PayrollLine {
   employeeId: string
-  kind: 'salary' | 'commission'
+  kind: 'salary' | 'commission' | 'wage' | 'contract'
   amount: number
 }
 export interface PayrollRun extends Dated {
@@ -712,6 +904,17 @@ export interface Db {
   investorTxns?: InvestorTxn[]
   distributions?: ProfitDistribution[]
   transfers?: AccountTransfer[]
+  /** Missing in books saved before warehouse sites were added. */
+  warehouses?: WarehouseSite[]
+  /** Attendance register: one row per person per day marked. */
+  attendance?: WorkDay[]
+  leaveRequests?: LeaveRequest[]
+  workplaces?: WorkPlace[]
+  staffTransfers?: StaffTransfer[]
+  /** Paid leave days each person gets in a year, by kind; missing kinds have no limit. */
+  leaveQuota?: Partial<Record<LeaveKind, number>>
+  /** Goods moved between our warehouses. */
+  stockTransfers?: StockTransfer[]
   /** Missing in books saved before tax, accounts and regular expenses were added. */
   taxRates?: TaxRate[]
   taxPayments?: TaxPayment[]

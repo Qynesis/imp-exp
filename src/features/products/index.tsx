@@ -10,7 +10,7 @@ import { PageHead } from '@/components/PageHead'
 import { LabelsSheet } from './sheets/LabelsSheet'
 import { go } from '@/core/router'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, IconBadge, Pill, Segmented, Stat, useSheets } from '@/ui'
+import { Button, Card, DataTable, IconBadge, Pill, Segmented, Stat, useSheets, SearchBox } from '@/ui'
 import { CategoryPanel } from './CategoryPanel'
 import { AddCategorySheet } from './sheets/AddCategorySheet'
 import { ProductDetailSheet } from './sheets/ProductDetailSheet'
@@ -79,7 +79,7 @@ export default function ProductsPage() {
               { value: 'recipe', label: 'No recipe yet' },
               ...(archivedCount || show === 'archived' ? [{ value: 'archived' as const, label: `Archived (${archivedCount})` }] : []),
             ]} />
-            <input className="in search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Product name or code" aria-label="Search products" />
+            <SearchBox value={q} onChange={setQ} placeholder="Product name or code" label="Search products" />
           </div>
           <DataTable
             pageSize={25}

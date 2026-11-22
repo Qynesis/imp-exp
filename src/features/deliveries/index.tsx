@@ -8,7 +8,7 @@ import { useBooks } from '@/core/store/context'
 import { BookCourierSheet } from '@/features/courier/BookCourierSheet'
 import { ViewInvoiceSheet } from '@/features/sales/sheets/ViewInvoiceSheet'
 import { TripSheet } from '@/features/transport/sheets/TripSheet'
-import { Button, Card, DataTable, Pill, Segmented, Stat, useConfirm, usePrint, useSheets, useToast } from '@/ui'
+import { Button, Card, DataTable, Pill, Segmented, Stat, useConfirm, usePrint, useSheets, useToast, SearchBox } from '@/ui'
 import { DeliveryChallan } from './DeliveryChallan'
 import { CloseRestSheet } from './sheets/CloseRestSheet'
 import { DeliverSheet } from './sheets/DeliverSheet'
@@ -71,9 +71,12 @@ export default function DeliveriesPage({ params: [tabParam] }: FeatureRouteProps
   )
 }
 
-function PendingTab({ rows, open, onSample }: { rows: ReturnType<typeof pendingDeliveries>; open: (inv: Invoice) => void; onSample?: () => void }) {
+function PendingTab({ rows: all, open, onSample }: { rows: ReturnType<typeof pendingDeliveries>; open: (inv: Invoice) => void; onSample?: () => void }) {
   const { db } = useBooks()
   const sheets = useSheets()
+  const [q, setQ] = useState('')
+  const n = q.trim().toLowerCase()
+  const rows = n ? all.filter((x) => `${x.inv.id} ${byId(db.dealers, x.inv.dealerId)?.name || ''}`.toLowerCase().includes(n)) : all
   const load = loadingList(db)
   return (
     <div className="stack">
@@ -90,10 +93,11 @@ function PendingTab({ rows, open, onSample }: { rows: ReturnType<typeof pendingD
         </div>
       </Card>
     )}
-    {!rows.length && onSample && (
+    {!all.length && onSample && (
       <div className="next-step"><span>Nothing is waiting. Load sample data to see pending, part-delivered, closed and returned bills.</span><Button size="sm" icon="box" className="edit-only" onClick={onSample}>Load sample data</Button></div>
     )}
-    <Card icon="clock" title="Waiting for delivery" sub="Oldest first. Stock is still in the warehouse for these; it is held for them.">
+    <Card icon="clock" title="Waiting for delivery" sub="Oldest first. Stock is still in the warehouse for these; it is held for them."
+      action={<SearchBox value={q} onChange={setQ} placeholder="Bill no. or dealer" label="Search waiting bills" />}>
       <DataTable pageSize={25} rows={rows} rowKey={(x) => x.inv.id} onRow={(x) => open(x.inv)}
         empty="Nothing waiting. Every bill has been delivered."
         columns={[
@@ -121,7 +125,9 @@ function DeliveredTab() {
   const print = usePrint()
   const confirm = useConfirm()
   const toast = useToast()
-  const rows = [...(db.deliveries || [])].reverse()
+  const [q, setQ] = useState('')
+  const n = q.trim().toLowerCase()
+  const rows = [...(db.deliveries || [])].reverse().filter((x) => !n || `${x.id} ${x.invoiceId} ${byId(db.dealers, x.dealerId)?.name || ''} ${x.receivedBy || ''}`.toLowerCase().includes(n))
   const undo = async (x: Delivery) => {
     const ok = await confirm({ title: x.cancelled ? `Reopen the closed rest of ${x.invoiceId}?` : `Undo delivery ${x.id}?`, message: x.cancelled ? 'The bill waits for these goods again, and any credit given is taken back.' : 'The goods go back into stock and the bill waits for them again.', confirmLabel: 'Undo', destructive: true })
     if (!ok) return
@@ -129,7 +135,8 @@ function DeliveredTab() {
     if (!refused) toast(x.cancelled ? `${x.invoiceId} reopened` : `${x.id} undone, goods back in stock`)
   }
   return (
-    <Card icon="check" title="Deliveries" sub="Every handover, newest first. Stock left the warehouse on these dates.">
+    <Card icon="check" title="Deliveries" sub="Every handover, newest first. Stock left the warehouse on these dates."
+      action={<SearchBox value={q} onChange={setQ} placeholder="Bill, delivery or dealer" label="Search deliveries" />}>
       <DataTable pageSize={25} rows={rows} rowKey={(x) => x.id} onRow={(x) => sheets.open(ViewInvoiceSheet, { invoiceId: x.invoiceId })}
         empty="No deliveries recorded yet."
         columns={[
@@ -157,7 +164,9 @@ function ReturnsTab() {
   const [days, setDays] = useState<'30' | '90' | '365'>('90')
   const [from, to] = lastNDays(Number(days))
   const sum = returnsBetween(db, from, to)
-  const rows = (db.returns || []).filter((r) => r.date >= from).slice().reverse()
+  const [q, setQ] = useState('')
+  const n = q.trim().toLowerCase()
+  const rows = (db.returns || []).filter((r) => r.date >= from && (!n || `${r.id} ${r.invoiceId} ${byId(db.dealers, r.dealerId)?.name || ''} ${r.reason}`.toLowerCase().includes(n))).slice().reverse()
   return (
     <div className="stack">
       <div className="grid2">
@@ -169,7 +178,7 @@ function ReturnsTab() {
           <BarList share="of units returned" format={(n) => fmt(n)} empty="No returns in this period." rows={sum.byProduct.map((p) => ({ id: p.id, name: p.name, value: p.units, note: `${p.unit} · ${tk(p.credit)}` }))} />
         </Card>
       </div>
-      <Card icon="undo" title="Every return" action={<Button size="sm" icon="undo" className="edit-only" onClick={() => sheets.open(ReturnSheet, {})}>Record a return</Button>}>
+      <Card icon="undo" title="Every return" action={<div className="tools-right"><SearchBox value={q} onChange={setQ} placeholder="Bill, dealer or reason" label="Search returns" /><Button size="sm" icon="undo" className="edit-only" onClick={() => sheets.open(ReturnSheet, {})}>Record a return</Button></div>}>
         <DataTable pageSize={25} rows={rows} rowKey={(r) => r.id} onRow={(r) => sheets.open(ViewInvoiceSheet, { invoiceId: r.invoiceId })}
           empty="No returns in this period."
           columns={[

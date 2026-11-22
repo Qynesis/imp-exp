@@ -50,7 +50,7 @@ http
       })
   })
   .listen(PORT, async () => {
-    console.log(`Star Bangla Trading server on http://localhost:${PORT}  (data: ${store.kind})`)
+    console.log(`Qyndms server on http://localhost:${PORT}  (data: ${store.kind})`)
     if (options.demo) console.log(`Demo logins are ON (password: ${options.demoPassword})`)
     const where = options.platformPassword ? 'from PLATFORM_ADMIN_PASSWORD' : databaseUrl() ? 'printed once below when first generated' : 'see ' + path.join(dataDir(), 'platform-admin.txt')
     console.log(`Platform owner sign-in: ${api.platformEmail}  (password: ${where})`)

@@ -102,6 +102,7 @@ export const chartOfAccounts = (db: Db, from: ISODate, to: ISODate): LedgerAccou
     const pr = months.map((m) => ({ m, p: payrollFor(db, m) }))
     add('expense', 6010, 'Salaries', sum(pr, (x) => x.p.salaryTotal), pr.map((x) => ({ date: '', details: fmonth(x.m), amount: x.p.salaryTotal })), 'employees')
     add('expense', 6020, 'Sales commission', sum(pr, (x) => x.p.commission), pr.map((x) => ({ date: '', details: fmonth(x.m), amount: x.p.commission })), 'employees')
+    add('expense', 6030, 'Workers’ wages and contracts', sum(pr, (x) => x.p.wages + x.p.contractPaid), pr.filter((x) => x.p.wages + x.p.contractPaid).map((x) => ({ date: '', details: fmonth(x.m), amount: x.p.wages + x.p.contractPaid })), 'employees')
     const rows = expenseRows(db, from, to)
     const heads = [...new Set([...EXPENSE_HEADS, ...(db.accountHeads || []).filter((h) => h.group === 'expense').map((h) => h.name), ...rows.map((r) => r.head)])]
     heads.forEach((h, i) => {

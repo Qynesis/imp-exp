@@ -149,6 +149,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       call: <T,>(method: HttpMethod, path: string, body?: unknown) => request<T>(method, path, body, ref.current.token),
       users: async (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => enter(await request<BooksResponse>(method, 'users' + query, body, ref.current.token)),
+      leave: async (body: unknown) => enter(await request<BooksResponse>('POST', 'leave', body, ref.current.token)),
+      attend: async (body: object) => enter(await request<BooksResponse>('POST', 'attendance', { ...body, tz: new Date().getTimezoneOffset() }, ref.current.token)),
     }
   }, [enter, leave])
 

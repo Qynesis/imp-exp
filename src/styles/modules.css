@@ -71,11 +71,18 @@
 .logo { display: inline-flex; align-items: center; flex: none; max-width: 100%; }
 .logo img { display: block; height: var(--h); width: auto; max-width: 100%; object-fit: contain; }
 .logo.light { background: #fff; border-radius: 10px; padding: 6px 10px; }
+.product-logo { display: inline-flex; align-items: center; gap: calc(var(--h) * 0.28); color: var(--ink); text-decoration: none; }
+.product-logo .brand-mark { flex: none; display: block; filter: drop-shadow(0 4px 10px rgba(15, 115, 99, 0.28)); }
+.product-logo-text { display: flex; flex-direction: column; line-height: 1; }
+.product-logo-text b { font: 750 calc(var(--h) * 0.62) / 1 var(--display, var(--font)); letter-spacing: -0.025em; }
+.product-logo-text small { font-size: calc(var(--h) * 0.27); color: var(--muted); margin-top: 3px; letter-spacing: 0.02em; }
+.product-logo.on-dark { color: #fff; }
+.product-logo.on-dark small { color: rgba(255, 255, 255, 0.65); }
 .side .brand { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .brand-text { min-width: 0; }
 .topbar .brand { align-items: center; flex-wrap: nowrap; gap: 10px; }
 .topbar .logo.light { padding: 3px 6px; border-radius: 7px; }
-.powered { font-size: 12px; color: var(--side-muted); padding: 10px 10px 0; }
+.powered { font-size: 12px; color: var(--side-muted); padding: 10px 10px 0; display: flex; align-items: center; gap: 8px; }
 .powered b { color: var(--side-text); }
 .auth-side .logo { margin-bottom: 14px; align-self: flex-start; }
 .platform { max-width: 1040px; margin: 0 auto; padding: 28px 20px 60px; display: flex; flex-direction: column; gap: 20px; }
@@ -106,3 +113,13 @@
 .powered-line b { color: var(--ink); }
 .auth-home { color: #cfe0db; font-size: 14px; text-decoration: none; align-self: flex-start; }
 .auth-home:hover { color: #fff; text-decoration: underline; }
+.chip small { font-weight: 400; opacity: 0.75; }
+.chip.add { display: inline-flex; align-items: center; gap: 4px; border-style: dashed; color: var(--brand); }
+.chip.add:hover { background: #eef6f3; }
+.src-pick .chips { margin-top: 2px; }
+.src-picked { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.src-picked li { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--fill); font-size: 13.5px; }
+.src-picked li > svg { margin-top: 2px; color: var(--brand); flex: none; }
+.src-picked li span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.src-add { display: flex; gap: 8px; margin-top: 8px; }
+.src-add .in { flex: 1; min-width: 0; }

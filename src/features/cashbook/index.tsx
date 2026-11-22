@@ -9,7 +9,7 @@ import { CollectSheet } from '@/features/dealers/sheets/CollectSheet'
 import { DealerStatementSheet } from '@/features/dealers/sheets/DealerStatementSheet'
 import { PaySheet } from '@/features/payments/PaySheet'
 import { PayTransporterSheet } from '@/features/transport/sheets/PayTransporterSheet'
-import { Button, Card, DataTable, Empty, Icon, Stat, useConfirm, useSheets, useToast } from '@/ui'
+import { Button, Card, DataTable, Empty, Icon, Stat, useConfirm, useSheets, useToast, SearchBox } from '@/ui'
 import { AddExpenseSheet } from './sheets/AddExpenseSheet'
 import { OpeningBalancesSheet } from './sheets/OpeningBalancesSheet'
 import { TransferSheet } from './sheets/TransferSheet'
@@ -22,6 +22,7 @@ export default function CashbookPage() {
   const today = todayISO()
   const [date, setDate] = useState(today)
   const cash = cashForDay(db, date)
+  const [q, setQ] = useState('')
   const rec = receivables(db)
   const pay = payables(db)
   const isToday = date === today
@@ -83,10 +84,10 @@ export default function CashbookPage() {
         </Card>
       )}
 
-      <Card title={isToday ? 'Today’s entries' : 'Entries on this day'}>
+      <Card title={isToday ? 'Today’s entries' : 'Entries on this day'} action={<SearchBox value={q} onChange={setQ} placeholder="Details, head or account" label="Search entries" />}>
         <DataTable
             pageSize={25}
-          rows={cash.entries}
+          rows={q.trim() ? cash.entries.filter((r) => `${r.details} ${r.head} ${r.method}`.toLowerCase().includes(q.trim().toLowerCase())) : cash.entries}
           rowKey={(_, i) => i}
           empty="No money moved on this day."
           columns={[

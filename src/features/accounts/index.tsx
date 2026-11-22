@@ -8,7 +8,7 @@ import { ClipButton } from '@/components/attachments/Attachments'
 import { PageHead } from '@/components/PageHead'
 import { go } from '@/core/router'
 import { accessGuard, useBooks } from '@/core/store/context'
-import { Button, Card, cls, DataTable, Field, Pill, Segmented, Stat, useConfirm, useSheets, useToast } from '@/ui'
+import { Button, Card, cls, DataTable, Field, Pill, Segmented, Stat, useConfirm, useSheets, useToast, SearchBox } from '@/ui'
 import { CHANGE_AREAS } from './areas'
 import { AccountDetailSheet, ChangeNoteSheet, PayTaxSheet, TaxRateSheet, UpdateCostSheet } from './sheets'
 
@@ -76,7 +76,7 @@ function Chart({ from, to, label }: { from: ISODate; to: ISODate; label: string 
         <Stat icon="trend" label={profit < 0 ? 'Loss in the period' : 'Profit in the period'} value={tk(Math.abs(profit))} tone={profit < 0 ? 'warn' : 'good'} sub={`Income ${tk(tot('income'))} − costs and expenses`} />
         <Stat icon="layers" label="Costing (into stock)" value={tk(tot('costing'))} sub="Bought, imported and made" />
       </div>
-      <input className="in" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an account by name or code" aria-label="Find an account" />
+      <SearchBox value={q} onChange={setQ} placeholder="Find an account by name or code" label="Find an account" />
       {(Object.keys(ACCOUNT_GROUPS) as AccountGroup[]).map((g) => {
         const rows = shown.filter((a) => a.group === g)
         if (!rows.length) return null
@@ -249,7 +249,7 @@ function Costing() {
   const rows = db.products.filter((p) => !p.archived && (!q || `${p.name} ${p.code}`.toLowerCase().includes(q.toLowerCase())))
   return (
     <Card icon="layers" title="Cost per unit" sub="What each item costs us, its price and margin, and the last reason the cost changed. Tap a row to update a cost with a note."
-      action={<input className="in" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" aria-label="Search items" />}>
+      action={<SearchBox value={q} onChange={setQ} placeholder="Search" label="Search items" />}>
       <DataTable rows={rows} rowKey={(p) => p.id} pageSize={25} onRow={canEdit ? (p) => sheets.open(UpdateCostSheet, { productId: p.id }) : undefined}
         columns={[
           { label: 'Item', primary: true, render: (p) => <span className="two-line"><b>{p.name}</b><small className="t-muted">{p.kind === 'finished' ? 'Product' : 'Material'} · {p.unit}</small></span> },

@@ -3,7 +3,7 @@ import { byId, fshort, tk, todayISO, type CourierProvider } from '@shared/domain
 import { courierLabel } from '@shared/courier'
 import { PhoneLink } from '@/components/PhoneLink'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, DataTable, Pill, Segmented, useSheets, useToast } from '@/ui'
+import { Button, Card, DataTable, Pill, Segmented, useSheets, useToast, SearchBox } from '@/ui'
 import { isDone } from './parcelTone'
 import { ParcelDetailSheet } from './ParcelDetailSheet'
 import { parcelStatusText, parcelTone } from './parcelTone'
@@ -58,7 +58,7 @@ export function ParcelsCard() {
               {used.map((p) => <option key={p} value={p}>{courierLabel(p)}</option>)}
             </select>
           )}
-          <input className="in search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Consignment, invoice, name or phone" aria-label="Search parcels" />
+          <SearchBox value={q} onChange={setQ} placeholder="Consignment, invoice, name or phone" label="Search parcels" />
         </div>
       </div>
       {!all.length && (
