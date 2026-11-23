@@ -19,9 +19,11 @@ import { localAnswer } from '../assistant/local'
 import { applyBusinessTypes, isBusinessType } from '../domain/catalog'
 import { MESSAGING_FIELDS, MessagingError, sendMessage, type MessagingKeys } from '../messaging'
 import { bookParcel, COURIER_PROVIDERS, courierAreas, courierBalance, CourierError, FIELDS, parcelStatus, testCourier, trackParcel, type BookRequest, type CourierKeys } from '../courier'
-import { defaultRoles, isAdmin, OWNER_ROLE_ID } from '../domain/permissions'
+import { defaultRoles, isAdmin, OWNER_ROLE_ID, receiptRefusal } from '../domain/permissions'
+import { reportAccess } from '../domain/calc/workReports'
 import { applyAction } from '../domain/actions'
 import { demoDb, emptyDb } from '../domain/seed'
+import { demoDubaiDb } from '../domain/seedDubai'
 import { isDb, type CourierProvider, type Db, type MessageChannel } from '../domain/types'
 import type { BillingView, CompanySummary, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
 
@@ -155,6 +157,11 @@ export const DEMO_USERS = [
   ['u5', 'Rina Akter', 'employee@demo.com', 'staff', 'e5'],
 ] as const
 const DEMO_TENANT = 'demo'
+/** Files people may attach: photos, PDFs, and office documents. */
+const FILE_TYPES = /^(image\/(jpeg|png|webp|gif)|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|application\/vnd\.ms-excel|text\/(plain|csv))$/
+/** A second demo company: a Dubai general trader on UAE customs and VAT. */
+const DEMO_DUBAI = 'demo-ae'
+export const DEMO_DUBAI_USERS = [['u1', 'Dubai Owner', 'dubai@demo.com', 'owner']] as const
 
 export const cleanEmail = (e: unknown): string => String(e ?? '').trim().toLowerCase()
 const validEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)
@@ -218,17 +225,24 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
           await store.set('books:' + DEMO_TENANT, books)
         }
       }
-      for (const [userId, , email] of DEMO_USERS) {
+      if (!(await store.get('books:' + DEMO_DUBAI))) {
+        const db = demoDubaiDb()
+        db.users = DEMO_DUBAI_USERS.map(([id, name, email, roleId]) => ({ id, name, email, roleId, employeeId: '' }))
+        await store.set('books:' + DEMO_DUBAI, { version: 1, db } satisfies TenantBooks)
+        await store.set('tenant:' + DEMO_DUBAI, { name: db.company.name, createdAt: new Date().toISOString() } satisfies TenantInfo)
+      }
+      const logins: [string, string, string][] = [...DEMO_USERS.map(([id, , email]) => [DEMO_TENANT, id, email] as [string, string, string]), ...DEMO_DUBAI_USERS.map(([id, , email]) => [DEMO_DUBAI, id, email] as [string, string, string])]
+      for (const [tenantId, userId, email] of logins) {
         const acc = await store.get<Account>('account:' + email)
-        if (acc?.tenantId === DEMO_TENANT && kit.equal(await kit.hashPassword(opts.demoPassword, acc.salt), acc.hash)) continue
+        if (acc?.tenantId === tenantId && kit.equal(await kit.hashPassword(opts.demoPassword, acc.salt), acc.hash)) continue
         const salt = kit.randomHex(16)
-        await store.set('account:' + email, { tenantId: DEMO_TENANT, userId, salt, hash: await kit.hashPassword(opts.demoPassword, salt) } satisfies Account)
+        await store.set('account:' + email, { tenantId, userId, salt, hash: await kit.hashPassword(opts.demoPassword, salt) } satisfies Account)
       }
     } else {
       // demo logins switched off: make sure nobody can still use them
-      for (const [, , email] of DEMO_USERS) {
+      for (const [tenantId, email] of [...DEMO_USERS.map(([, , e]) => [DEMO_TENANT, e]), ...DEMO_DUBAI_USERS.map(([, , e]) => [DEMO_DUBAI, e])]) {
         const acc = await store.get<Account>('account:' + email)
-        if (acc?.tenantId === DEMO_TENANT) await store.del('account:' + email)
+        if (acc?.tenantId === tenantId) await store.del('account:' + email)
       }
     }
   }
@@ -314,7 +328,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
   const billingOf = async (tenantId: string): Promise<BillingRecord> => {
     const rec = await store.get<BillingRecord>('billing:' + tenantId)
     if (rec) return rec
-    const fresh = tenantId === DEMO_TENANT ? { ...newBilling(Date.now(), trialDays), plan: 'free' as const } : newBilling(Date.now(), trialDays)
+    const fresh = tenantId === DEMO_TENANT || tenantId === DEMO_DUBAI ? { ...newBilling(Date.now(), trialDays), plan: 'free' as const } : newBilling(Date.now(), trialDays)
     await store.set('billing:' + tenantId, fresh)
     return fresh
   }
@@ -362,6 +376,7 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
   const routes: Record<string, Handler> = {
     'GET status': async (): Promise<StatusResponse> => {
       const logins: DemoLogin[] = DEMO_USERS.map(([, name, email, roleId]) => ({ name, email, role: roleId === 'staff' ? 'Employee' : roleId[0].toUpperCase() + roleId.slice(1) }))
+      for (const [, name, email] of DEMO_DUBAI_USERS) logins.push({ name, email, role: 'Dubai trader (UAE)' })
       if (opts.listPlatformInDemo) logins.push({ name: 'Platform owner', email: PLATFORM, role: 'Platform owner' })
       return {
         ok: store.ok,
@@ -449,6 +464,9 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const admin = isAdmin(cur, uid)
       if (!admin && !Object.values(myRole.perms).includes('edit')) throw new ApiFailure(403, 'Your role is view-only.')
       next.users = cur.users // users only change through the users routes
+      // goods go into stock only when an admin or the warehouse confirms them
+      const refused = receiptRefusal(cur, next, uid)
+      if (refused) throw new ApiFailure(403, refused)
       if (!admin) {
         // only an admin may change roles, company details and custom fields
         next.roles = cur.roles
@@ -687,16 +705,17 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     /** Keep a file for this company. The books only hold its id, name and size. */
     'POST files': async (req) => {
       const ctx = await auth(req)
-      needEditor(ctx)
+      // staff linked to an employee may attach files to their own reports, even on a view-only role
+      if (!ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)?.employeeId) needEditor(ctx)
       await needActive(ctx)
       const b = obj(req.body)
       const name = str(b.name).trim().slice(0, 120) || 'document'
       const type = str(b.type)
       const data = str(b.data)
-      if (!/^(image\/(jpeg|png|webp|gif)|application\/pdf)$/.test(type)) throw bad('Attach a photo (JPG, PNG, WebP) or a PDF.')
+      if (!FILE_TYPES.test(type)) throw bad('Attach a photo (JPG, PNG, WebP), a PDF, or a Word, Excel, CSV or text file.')
       if (!/^[A-Za-z0-9+/=]+$/.test(data)) throw bad('That file could not be read.')
       const size = Math.floor((data.length * 3) / 4)
-      if (size > 3 * 1024 * 1024) throw bad('That file is larger than 3 MB. Take a smaller photo or compress the PDF.')
+      if (size > 5 * 1024 * 1024) throw bad('That file is larger than 5 MB. Take a smaller photo or compress the file.')
       const id = 'f' + kit.randomHex(10)
       await store.set(`file:${ctx.acc.tenantId}:${id}`, { name, type, size, data, at: new Date().toISOString(), by: ctx.email })
       return { id, name, type, size }
@@ -863,6 +882,48 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
         ctx.tenant.db = run(() => applyAction(ctx.tenant.db, 'checkOut', { employeeId, date, time, work: str(b.work).slice(0, 300), output: num(b.output) }))
       } else {
         ctx.tenant.db = run(() => applyAction(ctx.tenant.db, 'checkIn', { employeeId, date, time, lat: ok ? lat : undefined, lng: ok ? lng : undefined }))
+      }
+      await saveBooks(ctx)
+      return { db: ctx.tenant.db, version: ctx.tenant.version }
+    },
+
+    /**
+     * Employees' written reports, for every role: the writer submits, edits, withdraws and replies; the
+     * line manager and people with "Employee reports" edit access review and reply. Checked here.
+     */
+    'POST work-report': async (req) => {
+      const ctx = await auth(req)
+      await needActive(ctx)
+      const b = obj(req.body)
+      const db = ctx.tenant.db
+      const me = db.users.find((u) => u.id === ctx.acc.userId)
+      const myEmployee = me?.employeeId || undefined
+      const at = new Date().toISOString()
+      const by = me?.name || ctx.email
+      const files = (Array.isArray(b.attachments) ? b.attachments : []).slice(0, 10).map((x) => obj(x)).filter((x) => /^f[0-9a-f]{20}$/.test(str(x.id)))
+        .map((x) => ({ id: str(x.id), name: str(x.name).slice(0, 120), type: str(x.type), size: Number(x.size) || 0 }))
+      const run = (fn: () => Db) => {
+        try { return fn() } catch (e) { throw bad((e as Error).message) }
+      }
+      const op = str(b.op)
+      if (op === 'submit' || op === 'withdraw') {
+        if (!myEmployee) throw new ApiFailure(403, 'Your login is not linked to an employee.')
+        ctx.tenant.db = op === 'submit'
+          ? run(() => applyAction(db, 'submitReport', { employeeId: myEmployee, id: str(b.id) || undefined, kind: str(b.kind) as 'daily', from: str(b.from).slice(0, 10), to: str(b.to).slice(0, 10), title: str(b.title).slice(0, 160), body: str(b.body), attachments: files, by, at }))
+          : run(() => applyAction(db, 'withdrawReport', { id: str(b.id), employeeId: myEmployee, by, at }))
+      } else {
+        const r = (db.workReports || []).find((x) => x.id === str(b.id))
+        if (!r) throw bad('No such report.')
+        const access = reportAccess(db, ctx.acc.userId, r)
+        if (op === 'review') {
+          if (!access.review) throw new ApiFailure(403, 'Only the manager or the office can review this report.')
+          const status = str(b.status)
+          if (!['reviewed', 'approved', 'changes'].includes(status)) throw bad('Pick how the report is answered.')
+          ctx.tenant.db = run(() => applyAction(db, 'reviewReport', { id: r.id, status: status as 'approved', comment: str(b.text).slice(0, 4000), attachments: files, by, byEmployee: myEmployee, at }))
+        } else if (op === 'reply') {
+          if (!access.read) throw new ApiFailure(403, 'You cannot see this report.')
+          ctx.tenant.db = run(() => applyAction(db, 'replyReport', { id: r.id, text: str(b.text).slice(0, 4000), attachments: files, by, byEmployee: myEmployee, at }))
+        } else throw bad('Unknown report action.')
       }
       await saveBooks(ctx)
       return { db: ctx.tenant.db, version: ctx.tenant.version }

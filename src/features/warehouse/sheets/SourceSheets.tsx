@@ -7,6 +7,7 @@ import { accessGuard, useBooks } from '@/core/store/context'
 import { AddSupplierSheet } from '@/features/suppliers/sheets/AddSupplierSheet'
 import { NewPurchaseSheet } from '@/features/suppliers/sheets/NewPurchaseSheet'
 import { Button, DataTable, Pill, Sheet, useSheetItem, useSheets, type SheetComponent } from '@/ui'
+import { SourceStockTable } from '../SourceStockTable'
 
 /** A supplier as the warehouse sees it: who and where they are, and every item they send. */
 export const SupplierSourceSheet: SheetComponent<{ supplierId: string }> = ({ supplierId }) => {
@@ -41,6 +42,8 @@ export const SupplierSourceSheet: SheetComponent<{ supplierId: string }> = ({ su
           { label: 'Last price', align: 'right', render: (r) => m(r.lastRate) },
           { label: 'Price range', align: 'right', render: (r) => (see.cost ? (r.minRate === r.maxRate ? tk(r.minRate) : `${tk(r.minRate)} – ${tk(r.maxRate)}`) : <Hidden />) },
         ]} />
+      <h3 className="sheet-h">Their goods in our warehouses</h3>
+      <SourceStockTable kind="supplier" id={s.id} name={s.name} />
     </Sheet>
   )
 }
@@ -67,12 +70,14 @@ export const ImportSourceSheet: SheetComponent<{ name: string }> = ({ name }) =>
       </div>
       <DataTable rows={list} rowKey={(x) => x.s.id} onRow={(x) => { close(); go('imports/' + x.s.id) }}
         columns={[
-          { label: 'Shipment', primary: true, render: (x) => <span className="two-line"><b>{x.s.id}</b><small className="t-muted">{x.s.lcNo ? `LC ${x.s.lcNo}` : 'No LC number'}</small></span> },
+          { label: 'Shipment', primary: true, render: (x) => <span className="two-line"><b>{x.s.id}</b><small className="t-muted">{x.s.lcNo ? (/^lc/i.test(x.s.lcNo) ? x.s.lcNo : `LC ${x.s.lcNo}`) : 'No LC number'}</small></span> },
           { label: 'Item', render: (x) => x.c.productName },
           { label: 'Quantity', align: 'right', render: (x) => `${fmt(x.s.qty)} ${x.s.unit}` },
           { label: 'Landed cost / unit', align: 'right', render: (x) => (see.cost ? tk(x.c.perUnit) : <Hidden />) },
           { label: 'Status', align: 'right', render: (x) => <Pill tone={x.c.tone}>{x.s.steps.warehouse?.date ? `In warehouse ${fdate(x.s.steps.warehouse.date)}` : x.c.status}</Pill> },
         ]} />
+      <h3 className="sheet-h">Their goods in our warehouses</h3>
+      <SourceStockTable kind="import" id={name} name={name} />
     </Sheet>
   )
 }

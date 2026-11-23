@@ -87,7 +87,7 @@ export default function RawMaterialsPage() {
 
       <div className="stats">
         <Stat icon="layers" label="In the warehouse" value={see.cost ? tk(sum.value.raw + sum.value.packaging) : <Hidden />} sub={`${fmt(sum.count.raw)} raw materials · ${fmt(sum.count.packaging)} packaging`} />
-        <Stat icon="ship" label="On the way" value={fmt(incoming.length)} sub={`${fmt(incoming.filter((i) => i.source === 'import').length)} imports · ${fmt(incoming.filter((i) => i.source === 'factory').length)} factory orders`} />
+        <Stat icon="ship" label="On the way" value={fmt(incoming.length)} sub={`${fmt(incoming.filter((i) => i.source === 'supplier').length)} supplier · ${fmt(incoming.filter((i) => i.source === 'import').length)} imports · ${fmt(incoming.filter((i) => i.source === 'factory').length)} factory`} />
         <Stat icon="factory" label="Lying at factories" value={see.cost ? tk(lyingValue) : <Hidden />} sub="Handed over, not used yet" />
         <Stat icon="alert" label="Low stock" value={fmt(lowCount)} tone={lowCount ? 'warn' : undefined} sub={lowCount ? 'Time to reorder' : 'All above their alert level'} />
       </div>
@@ -165,15 +165,15 @@ export default function RawMaterialsPage() {
         </Card>
       </div>
 
-      <Card icon="route" title="On the way" sub="Imports not yet in the warehouse and factory orders not yet fully received.">
+      <Card icon="route" title="On the way" sub="Supplier bills waiting for check-in, imports not yet in the warehouse and factory orders not yet fully received.">
         <div className="rows">
           {incoming.map((i) => {
             const p = byId(db.products, i.productId)
             return (
-              <button key={i.key} type="button" className="row click" onClick={() => go((i.source === 'import' ? 'imports/' : 'factory-orders/') + i.ref)}>
+              <button key={i.key} type="button" className="row click" onClick={() => go(i.source === 'supplier' ? 'warehouse/in' : (i.source === 'import' ? 'imports/' : 'factory-orders/') + i.ref)}>
                 <span className="two-line">
                   <span className="name">{p?.name}</span>
-                  <small className="t-muted">{i.ref} · {i.source === 'import' ? 'Import' : 'Local factory'} · {i.from}</small>
+                  <small className="t-muted">{i.source === 'supplier' ? byId(db.purchases, i.ref)?.billNo : i.ref} · {i.source === 'import' ? 'Import' : i.source === 'supplier' ? 'Supplier' : 'Local factory'} · {i.from}</small>
                 </span>
                 <span className="meta">{i.status}{i.expected ? ` · expected ${fshort(i.expected)}` : ''}</span>
                 <span className="amt">{fmt(i.qty)} {p?.unit}</span>

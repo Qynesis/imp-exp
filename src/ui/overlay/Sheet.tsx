@@ -91,37 +91,57 @@ interface FormSheetProps {
   crumb?: string
   note?: ReactNode
   submit: string
-  /** Return an error message to keep the sheet open, or nothing to close it. */
-  onSubmit: () => string | void
+  /** Return an error message to keep the sheet open, or nothing to close it. May wait on the server. */
+  onSubmit: () => string | void | Promise<string | void>
   children: ReactNode
   wide?: boolean
+  /** Label on the submit button while it works, e.g. "Saving…". */
+  busyLabel?: string
 }
 
 /** A sheet holding one form, with Cancel and a submit button. */
-export function FormSheet({ title, crumb, note, submit, onSubmit, children, wide }: FormSheetProps) {
+export function FormSheet({ title, crumb, note, submit, onSubmit, children, wide, busyLabel }: FormSheetProps) {
   const { close } = useSheetItem()
   const [err, setErr] = useState('')
-  const handle = (e: FormEvent<HTMLFormElement>) => {
+  const [busy, setBusy] = useState(false)
+  const errRef = useRef<HTMLDivElement>(null)
+  const fail = (why: string) => {
+    setErr(why)
+    // bring the reason into view on long forms
+    requestAnimationFrame(() => errRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }))
+  }
+  const handle = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    const problem = onSubmit()
-    if (typeof problem === 'string') setErr(problem)
-    else close()
+    if (busy) return
+    setErr('')
+    setBusy(true)
+    try {
+      const problem = await onSubmit()
+      setBusy(false)
+      if (typeof problem === 'string' && problem) fail(problem)
+      else close()
+    } catch (x) {
+      // never leave the person with a frozen form: say what went wrong and keep what they typed
+      console.error(x)
+      setBusy(false)
+      fail(x instanceof Error && x.message ? x.message : 'That could not be saved. Check your connection and try again.')
+    }
   }
   return (
     <Sheet
       title={title}
       crumb={crumb}
       wide={wide}
-      onSubmit={handle}
+      onSubmit={(e) => void handle(e)}
       footer={
         <>
-          <Button variant="secondary" onClick={close}>Cancel</Button>
-          <Button type="submit">{submit}</Button>
+          <Button variant="secondary" onClick={close} disabled={busy}>Cancel</Button>
+          <Button type="submit" loading={busy}>{busy ? busyLabel || 'Saving…' : submit}</Button>
         </>
       }
     >
       {note && <div className="note">{note}</div>}
-      {err && <div className="err" role="alert">{err}</div>}
+      {err && <div className="err" role="alert" ref={errRef}>{err}</div>}
       <div className="form-grid">{children}</div>
     </Sheet>
   )

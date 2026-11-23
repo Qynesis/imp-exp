@@ -3,7 +3,7 @@
  * and a directory of every source with full contact details and what each sends us.
  */
 import type { Db, ISODate, PartyDetails, Shipment, WarehouseSite } from '../types'
-import { byId, memo, sum } from './common'
+import { byId, memo, purchaseIn, sum } from './common'
 import { foCalc } from './factory'
 import { incomingStock } from './products'
 import { computeShipment } from './shipments'
@@ -43,17 +43,19 @@ export const inboundLog = (db: Db): InboundRow[] =>
     const prod = (id: string) => byId(db.products, id)
     const push = (r: Omit<InboundRow, 'productName' | 'unit'>) => out.push({ ...r, productName: prod(r.productId)?.name || 'Item', unit: prod(r.productId)?.unit || '' })
     for (const p of db.purchases) {
-      push({ key: 'p' + p.id, date: p.date, kind: 'supplier', sourceId: p.supplierId, sourceName: byId(db.suppliers, p.supplierId)?.name || 'Supplier', productId: p.productId, qty: p.qty, ref: p.billNo, note: '', siteId: p.siteId })
+      if (p.pending) continue
+      const note = [p.recv?.short ? `${p.recv.short} short or damaged` : '', p.recv?.note || '', p.recv?.by ? `checked in by ${p.recv.by}` : ''].filter(Boolean).join(' · ')
+      push({ key: 'p' + p.id, date: p.recv?.date || p.date, kind: 'supplier', sourceId: p.supplierId, sourceName: byId(db.suppliers, p.supplierId)?.name || 'Supplier', productId: p.productId, qty: purchaseIn(p), ref: p.billNo, note, siteId: p.siteId })
     }
     for (const o of db.factoryOrders) {
       for (const r of o.receipts) {
-        push({ key: 'r' + r.id, date: r.date, kind: 'factory', sourceId: o.factoryId, sourceName: byId(db.factories, o.factoryId)?.name || 'Factory', productId: o.productId, qty: r.qty, ref: r.challan || o.id, note: [r.damaged ? `${r.damaged} damaged` : '', r.note].filter(Boolean).join(' · '), siteId: r.siteId })
+        push({ key: 'r' + r.id, date: r.date, kind: 'factory', sourceId: o.factoryId, sourceName: byId(db.factories, o.factoryId)?.name || 'Factory', productId: o.productId, qty: r.qty, ref: r.challan || o.id, note: [r.damaged ? `${r.damaged} damaged` : '', r.note, r.by ? `checked in by ${r.by}` : ''].filter(Boolean).join(' · '), siteId: r.siteId })
       }
     }
     for (const s of db.imports) {
       const day = s.direction !== 'export' ? s.steps.warehouse?.date : undefined
       if (!day || !s.productId) continue
-      push({ key: 'i' + s.id, date: day, kind: 'import', sourceId: s.id, sourceName: `${importSourceName(s)}${s.supplier.trim() && s.country ? `, ${s.country}` : ''}`, productId: s.productId, qty: s.qty, ref: s.id, note: s.lcNo ? `LC ${s.lcNo}` : '', siteId: s.siteId })
+      push({ key: 'i' + s.id, date: day, kind: 'import', sourceId: s.id, sourceName: `${importSourceName(s)}${s.supplier.trim() && s.country ? `, ${s.country}` : ''}`, productId: s.productId, qty: s.qty, ref: s.id, note: [s.lcNo ? (/^lc/i.test(s.lcNo) ? s.lcNo : `LC ${s.lcNo}`) : '', s.steps.warehouse?.note || ''].filter(Boolean).join(' · '), siteId: s.siteId })
     }
     for (const r of db.returns || []) {
       if (r.sample || r.condition !== 'restock') continue
@@ -139,9 +141,9 @@ export const productOrigins = (db: Db, productId: string): ProductOrigins =>
     const supplierIds = [...new Set([...(p?.supplierIds || []), ...purchases.map((x) => x.supplierId)])]
     const suppliers = supplierIds.map((id) => {
       const s = byId(db.suppliers, id)
-      const mine = purchases.filter((x) => x.supplierId === id)
+      const mine = purchases.filter((x) => x.supplierId === id && !x.pending)
       const last = mine[mine.length - 1]
-      return { id, name: s?.name || 'Supplier', phone: s?.phone || '', address: s ? fullAddress(s) : '', preferred: !!p?.supplierIds?.includes(id), deliveries: mine.length, qty: sum(mine, (x) => x.qty), lastRate: last?.rate || 0, lastDate: last?.date || null }
+      return { id, name: s?.name || 'Supplier', phone: s?.phone || '', address: s ? fullAddress(s) : '', preferred: !!p?.supplierIds?.includes(id), deliveries: mine.length, qty: sum(mine, purchaseIn), lastRate: last?.rate || 0, lastDate: last?.date || null }
     })
     const orders = db.factoryOrders.filter((o) => o.productId === productId)
     const factories = [...new Set([...(p?.factoryIds || []), ...orders.map((o) => o.factoryId)])].filter((id) => byId(db.factories, id) || orders.some((o) => o.factoryId === id)).map((id) => {
@@ -190,7 +192,7 @@ export const siteStock = (db: Db): SiteStock =>
       row[siteId] = (row[siteId] || 0) + n
       qty.set(productId, row)
     }
-    for (const p of db.purchases) add(p.productId, p.siteId, p.qty)
+    for (const p of db.purchases) add(p.productId, p.siteId, purchaseIn(p))
     for (const o of db.factoryOrders) for (const r of o.receipts) add(o.productId, r.siteId, r.qty)
     for (const s of db.imports) if (s.direction !== 'export' && s.steps.warehouse?.date) add(s.productId, s.siteId, s.qty)
     for (const t of db.stockTransfers || []) for (const l of t.lines) { add(l.productId, t.from, -l.qty); add(l.productId, t.to, l.qty) }
@@ -244,4 +246,59 @@ export const siteSummaries = (db: Db): SiteSummary[] =>
         movedIn: transfers.filter((t) => t.to === site.id).length, movedOut: transfers.filter((t) => t.from === site.id).length,
       }
     })
+  })
+
+/** A warehouse as people name it: its code first when it has one. */
+export const siteLabel = (w: Pick<WarehouseSite, 'name' | 'code'> | undefined): string => (w ? (w.code ? `${w.code} · ${w.name}` : w.name) : '')
+
+export interface SourceStockRow {
+  productId: string
+  name: string
+  code: string
+  unit: string
+  /** Everything received from this source, and how much of it went into each warehouse. */
+  received: number
+  receivedBySite: Record<string, number>
+  deliveries: number
+  lastDate: ISODate | null
+  /** What we hold of the item now, in total and in each warehouse (from every source). */
+  stock: number
+  stockBySite: Record<string, number>
+  lowAt: number
+}
+
+/**
+ * One source's goods: each item a supplier, factory or overseas supplier sent us, how much came and
+ * into which warehouse, and how much of that item we hold now. `id` is the supplier or factory id,
+ * or the overseas supplier's name.
+ */
+export const sourceStock = (db: Db, kind: 'supplier' | 'factory' | 'import', id: string): SourceStockRow[] =>
+  memo(db, `sourceStock:${kind}:${id}`, () => {
+    const st = siteStock(db)
+    const key = id.trim().toLowerCase()
+    const ships = new Set(kind === 'import' ? db.imports.filter((s) => s.direction !== 'export' && importSourceName(s).toLowerCase() === key).map((s) => s.id) : [])
+    const log = inboundLog(db).filter((r) => r.kind === kind && (kind === 'import' ? ships.has(r.sourceId) : r.sourceId === id))
+    const ids = new Set(log.map((r) => r.productId))
+    // items listed as coming from them count too, even before the first delivery
+    for (const p of db.products) {
+      if (kind === 'supplier' && p.supplierIds?.includes(id)) ids.add(p.id)
+      if (kind === 'factory' && p.factoryIds?.includes(id)) ids.add(p.id)
+      if (kind === 'import' && p.importFrom?.some((n) => n.trim().toLowerCase() === key)) ids.add(p.id)
+    }
+    const out: SourceStockRow[] = []
+    for (const pid of ids) {
+      const p = byId(db.products, pid)
+      if (!p) continue
+      const mine = log.filter((r) => r.productId === pid)
+      const receivedBySite: Record<string, number> = {}
+      for (const r of mine) {
+        const site = r.siteId && st.sites.some((w) => w.id === r.siteId) ? r.siteId : st.mainId
+        if (site) receivedBySite[site] = (receivedBySite[site] || 0) + r.qty
+      }
+      out.push({
+        productId: pid, name: p.name, code: p.code, unit: p.unit, received: sum(mine, (r) => r.qty), receivedBySite, deliveries: mine.length, lastDate: mine[0]?.date || null,
+        stock: p.stock, stockBySite: { ...(st.qty.get(pid) || {}) }, lowAt: p.lowAt,
+      })
+    }
+    return out.sort((a, b) => b.received - a.received || a.name.localeCompare(b.name))
   })

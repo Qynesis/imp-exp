@@ -1,6 +1,9 @@
 import type { Attachment } from '@shared/domain'
 
 const MAX_SIDE = 1600
+/** Office documents and plain text, sent as they are. */
+const DOC_TYPES = ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/plain', 'text/csv']
+export const ACCEPT_FILES = 'image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt'
 
 /** A photo of a receipt, made smaller (1600px, JPEG) so it uploads fast on mobile data and stays readable. */
 function shrinkPhoto(file: File): Promise<{ type: string; data: string }> {
@@ -39,8 +42,10 @@ const readBase64 = (file: File): Promise<string> =>
 /** Upload one picked file through the API and get back what the books keep about it. */
 export async function uploadFile(call: <T>(m: 'POST', p: string, b: unknown) => Promise<T>, file: File): Promise<Attachment> {
   const isPdf = file.type === 'application/pdf'
-  if (!isPdf && !file.type.startsWith('image/')) throw new Error('Attach a photo or a PDF')
-  const body = isPdf ? { type: 'application/pdf', data: await readBase64(file) } : await shrinkPhoto(file)
+  const isDoc = DOC_TYPES.includes(file.type)
+  if (!isPdf && !isDoc && !file.type.startsWith('image/')) throw new Error('Attach a photo, a PDF, or a Word, Excel, CSV or text file')
+  if (file.size > 5 * 1024 * 1024 && !file.type.startsWith('image/')) throw new Error('That file is larger than 5 MB')
+  const body = isPdf || isDoc ? { type: file.type, data: await readBase64(file) } : await shrinkPhoto(file)
   return call<Attachment>('POST', 'files', { name: file.name || (isPdf ? 'document.pdf' : 'receipt.jpg'), ...body })
 }
 

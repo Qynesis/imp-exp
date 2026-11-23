@@ -30,6 +30,7 @@ export const EmployeeSheet: SheetComponent<{ employeeId?: string; kind?: StaffKi
     custom: (cur?.custom || {}) as CustomValues,
     extra: (cur?.extra || []).map((x) => ({ ...x })),
     placeId: cur?.placeId || '',
+    managerId: cur?.managerId || '',
   }))
   const worker = v.kind === 'worker'
   // once transfers exist, the workplace changes only through a transfer order
@@ -56,7 +57,7 @@ export const EmployeeSheet: SheetComponent<{ employeeId?: string; kind?: StaffKi
           dailyRate: pay === 'daily' ? num(v.dailyRate) : undefined,
           contract: pay === 'contract' ? { amount: num(v.cAmount), start: v.cStart, end: v.cEnd, work: v.cWork.trim() } : undefined,
           joined: v.joined, department: v.department.trim(), address: v.address.trim(), nid: v.nid.trim(), emergency: v.emergency.trim(), note: v.note.trim(),
-          custom: v.custom, extra: extra.length ? extra : undefined, placeId: moved ? cur?.placeId : v.placeId || undefined,
+          custom: v.custom, extra: extra.length ? extra : undefined, placeId: moved ? cur?.placeId : v.placeId || undefined, managerId: v.managerId || undefined,
         })
         if (why) return why
         toast(cur ? `${v.name.trim()} saved` : `${worker ? 'Worker' : 'Employee'} added`)
@@ -69,6 +70,12 @@ export const EmployeeSheet: SheetComponent<{ employeeId?: string; kind?: StaffKi
       <Field label="Phone"><input {...bind('phone')} inputMode="tel" placeholder="01XXX-XXXXXX" /></Field>
       <Field label="Job title"><input {...bind('role')} placeholder={worker ? 'e.g. Loader, Packer, Machine helper' : 'e.g. Sales officer, Accountant'} /></Field>
       <Field label="Department"><input {...bind('department')} placeholder="e.g. Sales, Warehouse, Packing" /></Field>
+      <Field label="Reports to" hint="Their written reports go to this manager as well as the office.">
+        <select {...bind('managerId')}>
+          <option value="">The office only</option>
+          {db.employees.filter((x) => x.id !== cur?.id && x.status !== 'left').map((x) => <option key={x.id} value={x.id}>{x.name}{x.role ? ` · ${x.role}` : ''}</option>)}
+        </select>
+      </Field>
       {places.length > 0 && (
         <Field label="Works at" hint={moved ? 'Changed with a transfer order from their profile.' : 'Their first workplace. Later moves are transfer orders.'}>
           <select {...bind('placeId')} disabled={moved}>

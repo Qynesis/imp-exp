@@ -1,4 +1,7 @@
-import type { Dated } from '../types'
+import type { Dated, Purchase } from '../types'
+
+/** What a supplier's bill put into stock: nothing while the warehouse has not confirmed it, less anything short or damaged. */
+export const purchaseIn = (p: Pick<Purchase, 'qty' | 'pending' | 'recv'>): number => (p.pending ? 0 : Math.max(p.qty - (p.recv?.short || 0), 0))
 
 export const byId = <T extends { id: string }>(list: readonly T[], id: string | null | undefined): T | undefined =>
   id ? list.find((x) => x.id === id) : undefined

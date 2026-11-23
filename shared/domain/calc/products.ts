@@ -1,6 +1,6 @@
 import { addDays, fmt, todayISO } from '../format'
 import type { Db, ISODate, Product, ProductKind, ProductSource } from '../types'
-import { byDateTs, byId, memo, sum } from './common'
+import { byDateTs, byId, memo, purchaseIn, sum } from './common'
 import { foCalc } from './factory'
 import { stepKeys, stepLabel } from './shipments'
 
@@ -154,7 +154,7 @@ export const stockHistory = (db: Db, productId: string): { moves: StockMove[]; o
     const add = (key: string, date: ISODate | undefined, ts: number, label: string, ref: string, qty: number) => {
       if (date && qty) out.push({ key, date, ts, label, ref, qty })
     }
-    for (const x of db.purchases) if (x.productId === productId) add(x.id, x.date, x.ts, `Bought from ${byId(db.suppliers, x.supplierId)?.name || 'supplier'}`, x.billNo, x.qty)
+    for (const x of db.purchases) if (x.productId === productId) add(x.id, x.recv?.date || x.date, x.ts, `Bought from ${byId(db.suppliers, x.supplierId)?.name || 'supplier'}`, x.billNo, purchaseIn(x))
     for (const o of db.factoryOrders) {
       const f = byId(db.factories, o.factoryId)?.name || 'factory'
       if (o.productId === productId) for (const r of o.receipts) add(r.id, r.date, r.ts, `Received from ${f}`, [o.id, r.challan].filter(Boolean).join(' · '), r.qty)
@@ -257,7 +257,7 @@ export const stockSummary = (db: Db): StockSummary =>
 
 export interface Incoming {
   key: string
-  source: 'import' | 'factory'
+  source: 'import' | 'factory' | 'supplier'
   productId: string
   qty: number
   /** Shipment or factory order id, for linking. */
@@ -288,6 +288,11 @@ export const incomingStock = (db: Db, kinds: readonly ProductKind[]): Incoming[]
       const c = foCalc(db, o)
       if (c.pending <= 0) continue
       out.push({ key: o.id, source: 'factory', productId: o.productId, qty: c.pending, ref: o.id, from: c.factory?.name || 'Factory', status: c.received ? `${fmt(c.received)} received so far` : 'Ordered', expected: o.expected })
+    }
+    // supplier bills entered but not yet counted in by the warehouse
+    for (const x of db.purchases) {
+      if (!x.pending || !wanted(x.productId)) continue
+      out.push({ key: 'p' + x.id, source: 'supplier', productId: x.productId, qty: x.qty, ref: x.id, from: byId(db.suppliers, x.supplierId)?.name || 'Supplier', status: `Bill ${x.billNo} · waiting for check-in`, expected: x.expected || x.date })
     }
     return out.sort((a, b) => (a.expected || '9') < (b.expected || '9') ? -1 : 1)
   })

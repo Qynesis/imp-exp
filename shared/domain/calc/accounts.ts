@@ -119,7 +119,7 @@ export const chartOfAccounts = (db: Db, from: ISODate, to: ISODate): LedgerAccou
     const lc = imports.filter((s) => inRange(s.steps.lc?.date, from, to))
     add('costing', 7100, 'Imports: LC value', sum(lc, (s) => s.usd * s.rate), lc.map((s) => ({ date: s.steps.lc?.date || '', details: `${s.id} · ${s.productName}`, amount: r2(s.usd * s.rate) })), 'imports')
     const costTypes = new Map<string, AccountRow[]>()
-    for (const s of imports) for (const c of s.costs) if (inRange(c.date, from, to)) costTypes.set(c.type, [...(costTypes.get(c.type) || []), { date: c.date, details: s.id, amount: c.amount }])
+    for (const s of imports) for (const c of s.costs) if (!c.recoverable && inRange(c.date, from, to)) costTypes.set(c.type, [...(costTypes.get(c.type) || []), { date: c.date, details: s.id, amount: c.amount }])
     ;[...costTypes.entries()].forEach(([type, list], i) => add('costing', 7110 + i * 10, `Imports: ${type}`, sum(list, (r) => r.amount), list, 'imports'))
     const receipts = db.factoryOrders.flatMap((o) => o.receipts.filter((r) => inRange(r.date, from, to)).map((r) => ({ o, r })))
     add('costing', 7300, 'Factory goods received (making value)', sum(receipts, (x) => x.r.qty * x.o.rate), receipts.map((x) => ({ date: x.r.date, details: `${x.o.id} · ${x.r.challan || 'lot'}`, amount: r2(x.r.qty * x.o.rate) })), 'factory-orders')

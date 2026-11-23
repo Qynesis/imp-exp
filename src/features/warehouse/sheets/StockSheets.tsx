@@ -11,10 +11,10 @@ import { WarehouseSiteSheet } from './WarehouseSiteSheet'
 
 /** An import has reached our warehouse: which one, and when. Its goods go into stock at landed cost. */
 export const ArriveImportSheet: SheetComponent<{ importId: string }> = ({ importId }) => {
-  const { db, act } = useBooks()
+  const { db, act, session } = useBooks()
   const toast = useToast()
   const s = byId(db.imports, importId)
-  const [v, , bind] = useForm({ date: todayISO(), siteId: siteStock(db).mainId })
+  const [v, set, bind] = useForm({ date: todayISO(), siteId: siteStock(db).mainId, note: '' })
   if (!s) return null
   const p = byId(db.products, s.productId)
   return (
@@ -22,12 +22,16 @@ export const ArriveImportSheet: SheetComponent<{ importId: string }> = ({ import
       note={`${fmt(s.qty)} ${p?.unit || s.unit} of ${p?.name || s.productName} from ${importSourceName(s)} go into stock at their landed cost.${s.steps.customs?.date ? '' : ' Customs is not marked cleared yet — check the papers first.'}`}
       onSubmit={() => {
         if (v.date > todayISO()) return 'The date cannot be in the future.'
-        const why = act('markImportStep', { importId: s.id, key: 'warehouse', date: v.date, siteId: v.siteId || undefined })
+        const why = act('markImportStep', { importId: s.id, key: 'warehouse', date: v.date, siteId: v.siteId || undefined, note: v.note, by: byId(db.users, session.userId)?.name || '' })
         if (why) return why
         toast(`${s.id} is in stock`)
       }}>
       <Field label="Arrived on"><input type="date" max={todayISO()} {...bind('date')} /></Field>
       <SitePicker db={db} bind={bind('siteId')} />
+      <label className="field wide">
+        <span className="field-label">Note <small className="t-muted">optional</small></span>
+        <textarea className="in" rows={3} maxLength={500} value={v.note} onChange={(e) => set('note', e.target.value)} placeholder="e.g. truck no., cartons counted, any damage" />
+      </label>
     </FormSheet>
   )
 }
@@ -105,7 +109,7 @@ export const SiteDetailSheet: SheetComponent<{ siteId: string }> = ({ siteId }) 
   const moves = (db.stockTransfers || []).filter((t) => t.from === w.id || t.to === w.id).sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 12)
   const items = sum.items.filter((x) => !q.trim() || x.name.toLowerCase().includes(q.trim().toLowerCase()))
   return (
-    <Sheet title={w.name} crumb={main ? 'Main warehouse' : 'Warehouse'} wide
+    <Sheet title={w.name} crumb={`${w.code ? w.code + ' · ' : ''}${main ? 'Main warehouse' : 'Warehouse'}`} wide
       footer={canEdit ? (
         <>
           {!main && <Button variant="secondary" onClick={async () => {
@@ -125,6 +129,7 @@ export const SiteDetailSheet: SheetComponent<{ siteId: string }> = ({ siteId }) 
         </>
       ) : undefined}>
       <div className="kv-list boxed">
+        <div className="kv"><span>Code</span><b>{w.code ? <span className="wh-code">{w.code}</span> : <span className="t-muted">No code yet{canEdit ? ' — an admin can add one with Edit' : ''}</span>}</b></div>
         <div className="kv"><span>Address</span><b>{fullAddress(w) || '—'}</b></div>
         <div className="kv"><span>In charge</span><b>{w.manager || '—'}{w.phone && <> · <PhoneLink phone={w.phone} label={w.name} /></>}</b></div>
         <div className="kv"><span>Holds about</span><b>{w.capacity || '—'}</b></div>
@@ -138,7 +143,7 @@ export const SiteDetailSheet: SheetComponent<{ siteId: string }> = ({ siteId }) 
       </div>
       <h3 className="sheet-h">Stock here</h3>
       <SearchBox value={q} onChange={setQ} placeholder="Item name" />
-      <DataTable rows={items} rowKey={(x) => x.productId} pageSize={12} empty="Nothing in stock here."
+      <DataTable rows={items} rowKey={(x) => x.productId} pageSize={12} exportName={`stock-${(w.code || w.name).toLowerCase().replace(/\W+/g, '-')}`} empty="Nothing in stock here."
         columns={[
           { label: 'Item', primary: true, render: (x) => <b>{x.name}</b> },
           { label: 'Quantity', align: 'right', render: (x) => <span className={x.qty < 0 ? 't-warn' : x.low ? 't-warn strong' : undefined}>{fmt(x.qty)} {x.unit}{x.low ? ' · low' : ''}</span> },

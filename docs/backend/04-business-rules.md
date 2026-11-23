@@ -435,13 +435,34 @@ Income − cost − expenses equals the P&L net for the same months; the tests c
   - People with `attendance` (or `employees`) edit access correct any day with `editWorkDay` (status, in, out, work, pieces, note; empty status clears it); the change keeps who made it. The office register (`saveAttendance`) keeps a person's own check-in times.
   - The Attendance screen shows a day board (at work, not marked, late, away from site) and a month grid with totals; both export to Excel and CSV.
 - **Tables:** every list pages by offset (page numbers over rows already loaded; 25 a page by default, 10/25/50/100 to choose) and exports all matching rows, not only the page, to CSV (UTF-8 with BOM) or .xlsx. In the NestJS API, list endpoints take `?page=&size=` (offset/limit with a total count); for very large, constantly growing logs (cashbook, audit) a keyset cursor (`?after=<date,id>`) avoids slow deep pages.
+- **Written reports:** `WorkReport` (daily, weekly, monthly, incident, other; period; title; text up to 20,000 characters; up to 10 files; status submitted → reviewed / approved / changes, or withdrawn; a thread of replies with files). `Employee.managerId` sets who an employee reports to (loops refused).
+  - Who: the writer reads their own; the line manager reads and reviews their direct reports'; people with `staff-reports` view read all, with edit they also review. Nobody reviews their own report.
+  - Every change goes through `POST work-report` (`op: submit | withdraw | reply | review`), which checks these rules on the server, so view-only staff can still write and managers without book-editing rights can still review. `POST files` accepts uploads from any user linked to an employee; files may be photos, PDF, Word, Excel, CSV or text, up to 5 MB.
+  - The writer can edit while the report waits or after changes were asked (the version goes up and the thread notes it); an answered report is locked. Asking for changes needs a note.
+  - Alerts: new reports to the office (incidents ranked urgent) and to the line manager; answers and replies to the writer.
 - **My work:** a user linked to an employee (`User.employeeId`) always gets `view` on `my-work`, whatever the role, and sees only their own sales, attendance, pay and history. The `staff` role ("Employee (own profile only)") has no other screens. Admins link and unlink employees through `POST/PATCH users` (`employeeId`); one login per employee.
   - The NestJS backend must serve My work from its own endpoint that returns only that employee's rows. Today the whole books still reach the browser for every role, so a staff login must not be treated as private until that endpoint exists.
+
+## 4.20b Import and export terms, duty and VAT
+
+- **Terms:** each shipment has `trade` (`TradeInfo`): transport mode (sea, air, road, rail, courier), Incoterm (EXW … DDP; FAS/FOB/CFR/CIF are refused for non-sea transport), payment terms (sight or usance LC, TT advance/after, CAD, DA, sales contract, open account), currency, ports, ETD/ETA, carrier, vessel/flight/truck, B/L / AWB / truck receipt, containers, forwarder, C&F agent, PI / invoice / EXP numbers, LC details (amount, margin %, opened, last shipment, expiry, banks, retired), export cash incentive and source tax %. `saveTrade` refuses ETA before ETD and a last shipment date after expiry.
+- **Customs value (Bangladesh):** invoice value in Tk, plus freight when the Incoterm leaves it to the buyer (EXW/FCA/FAS/FOB), plus insurance when it does (or 1% of cost and freight when unknown), = CIF; + 1% landing charge = assessable value. CD and RD on AV; SD on AV + CD + RD; VAT and AT on AV + CD + RD + SD; AIT on AV (`dutyQuote`). HS presets give typical rates to check against the year's tariff.
+- **Recording duty:** `postDuties` writes one cost line per duty. CD, RD and SD stay in the landed cost; VAT, AT (input VAT) and AIT (advance income tax) are `recoverable` when the importer claims them back, so they are left out of stock cost and of import costing, and appear in the tax report instead.
+- **Costs** carry a group (freight, bank, port, clearance, duty, inland, other); the heads offered depend on mode and direction.
+- **Exports:** `realiseExport` records money received (part or all) at the bank's rate; the rate is averaged, a bank charge becomes a cost, and full receipt marks the shipment paid. The cashbook uses the realised Tk amount. Proceeds unpaid more than 90 days raise a warning; past 120 days it is urgent.
+- **Alerts:** LC expiring within 15 days or expired, last shipment date passed, vessel/flight late, usance payment due within 10 days, demurrage running, export proceeds overdue — shown on the shipment, the hub and in notifications.
+
+- **Customs regimes by country** (`regimeOf(company.tax.country)`):
+  - **Bangladesh:** CIF + 1% landing charge = AV; CD, RD, SD, VAT, AT, AIT as above; 1% insurance rule; 120-day export proceeds rule; cash incentive and bank source tax.
+  - **UAE / GCC (AE, SA):** CIF = customs value (no landing charge); customs duty (GCC common tariff, mostly 5%) and excise on CIF; import VAT (5% UAE) on CIF + duty + excise; only VAT is recoverable. Customs procedures: local market (pay now), free zone and transit (duty and VAT suspended; posting refused), re-export (duty paid as a refundable deposit, no VAT; `refundDeposit` puts it back in the cashbook when the goods leave). Exports may link `sourceImportId`, and their cost of goods is the source import's landed cost per unit. Papers: Mirsal import declaration, delivery order, free zone entry/exit certificate, Dubai Chamber certificate of origin.
+  - **Other countries:** customs duty and excise on CIF, VAT/GST on CIF + duty + excise.
+- **Editing shipments:** `saveShipmentBasics` (item, quantity and unit locked once stock moved; description and HS code always), `updateImportCost`, `updateTrackEvent`, `setStepDate` (a done step that moved stock keeps a date and cannot be undone; others can be set back to pending; expected dates any time), `removeShipment` (refused once stock moved, with a transport trip booked, or with a linked re-export). Export proceeds totals can be corrected in the terms form.
 
 ## 4.21 Sample data
 
 Sample data lets people try the delivery and courier screens.
 
+- A second demo company, **Al Noor General Trading LLC (Dubai)**, `dubai@demo.com`: UAE customs and AED, a JAFZA free zone warehouse, a smartphone import into the free zone re-exported to Kenya, laptops by air for the local market (5% duty + 5% VAT), rice on a usance LC, and brake pads entered for re-export to Oman with a customs deposit.
 - Sample rows: `Dealer.sample` ("Sample Dealer (test)"), bills `SMP-1…6`, their deliveries and
   returns, and `Parcel.test`.
 - **Never** move stock, never count in sales, P&L, payroll, cashbook, receivables, reserved stock,
@@ -458,3 +479,20 @@ The permission guard checks the page level before the service runs (05 §5.4). S
   messaging settings and keys.
 - The Owner role cannot be removed, and the last Owner cannot be demoted or deleted.
 - Users change only through the users routes, never through a books save.
+
+## Step confirmation, warehouse codes and stock by source
+
+- **Every shipment step and customs stage is confirmed in a popup** (`StepDoneSheet`, `CustomsStageSheet`): the date it happened (default today) and an optional note (≤ 500 chars). The note and the confirming user's name are kept on `StepState.note/by` and `CustomsInfo.stageNotes[stage]`.
+- `markImportStep` refuses: unknown steps, a step already done, future dates, and a date **before an earlier done step or after a later one** (`stepInOrder`). `setStepDate` applies the same order rule when a done date changes, and can edit the note.
+- `markCustomsStage` refuses future dates and a date before the previous done stage. Releasing marks the shipment's customs step with the same note.
+- **Warehouse code** (`WarehouseSite.code`): 2–12 letters, digits or dashes, stored upper-case, unique in the books. Only admins (`isAdmin`, settings edit) can set it in the UI. Shown as `CODE · Name` (`siteLabel`) wherever a warehouse is picked or listed.
+- **Stock by source** (`sourceStock(db, kind, id)`): for a supplier, factory or overseas supplier (by name), each item they sent: total received, received into each warehouse, and current stock in each warehouse. Used by Warehouse → Stock (filter by warehouse and by supplier/source) and the supplier, factory and import-source sheets.
+
+## Receiving goods into the warehouse
+
+- **Supplier bills wait for check-in.** A supplier bill (`newPurchase` with `pending: true`) records what we owe at once, but adds nothing to stock. It appears under Warehouse → To receive, and in each "On the way" count, until someone confirms it.
+- **Confirming** (`confirmPurchase`) needs a date that is no earlier than the bill date and not in the future, plus the warehouse the goods went into. A short or damaged quantity can be recorded; it must be less than the billed quantity and needs a note. Stock goes up by the billed quantity minus that. The bill keeps `recv = { date, by, short?, note? }`.
+- **Cancelling** (`cancelPurchase`) is only possible while the bill is still pending and nothing has been paid on it.
+- **Factory goods** (`receiveShipment`) are checked too: the quantity cannot be more than is still due, the date cannot be in the future or before the order was placed, and the receipt records who checked it in (`by`).
+- **Who may receive:** an admin, or a role that has *edit* access to Warehouse (`canReceive`). The server applies `receiptRefusal` on every save and returns 403 when anyone else turns a pending bill into stock, saves a bill straight into stock, or adds a factory receipt. Someone without that access gets a pending bill. A person who can receive may tick "received now" on a new bill.
+- **Confirmation popups wait for the server** (`saveNow`). If the server refuses, the reason appears inside the popup rather than in a later toast.

@@ -4,24 +4,26 @@
  */
 import { applyBusinessTypes, TRANSPORT_HEAD } from './catalog'
 import { byId, mustFind } from './calc/common'
-import { emptyCustoms } from './calc/customs'
+import { customsStages, emptyCustoms } from './calc/customs'
 import { productInUse } from './calc/products'
 import { sampleParcels } from './sampleParcels'
 import { addSampleDelivery, hasSampleDelivery, removeSampleDelivery } from './sampleDelivery'
-import { computeShipment } from './calc/shipments'
+import { computeShipment, stepKeys, stepLabel } from './calc/shipments'
 import { depreciationDue } from './calc/assets'
 import { accountOf } from './calc/cashbook'
 import { qtyAt, siteStock } from './calc/warehouse'
+import { defaultTrade, groupOf, INCOTERMS, MODES, PAYMENT_TERMS, regimeOf } from './tradeCatalog'
+import { customsCalc as computeDuties } from './calc/customs'
 import { datesBetween, LEAVE_KINDS } from './calc/payroll'
 import { postingOf } from './calc/postings'
 import { atSite, hoursOf } from './calc/attendance'
-import { fmt, tk, todayISO } from './format'
+import { fdate, fmt, tk, todayISO } from './format'
 import { countryByCode } from './countries'
 import { investorRows, profitPool, splitProfit } from './calc/investors'
 import type {
   Advance, BusinessTypeId, Category, Collection, Company, CustomsInfo, CustomsStage, Dealer, Db, Direction, Employee, Expense, Factory,
   FactoryOrderType, FieldDef, ISODate, Invoice, Delivery, FactoryEstimate, MaterialGiven, MessageLog, MessagingSettings, SalesQuote, SalesReturn, MaterialSettlement, Parcel, Production, TransportLink, Trip, TripStatus, Vehicle, StockAdjustment, MonthKey, PayrollLine, Permissions, Product, Shipment, StepKey, Supplier, SupplierTerms,
-  CustomValues, JobEvent, LeaveRequest, WorkPlace, Role, WarehouseSite, WorkDay, FixedAsset, Investor, InvestorTxnKind, Attachment, ChangeArea, ChangeNote, Currency, ExpenseAccount, ExpenseEntry, TaxKind, TaxPayment, TaxRate, AccountHead, AttachTarget,
+  CustomValues, CostGroup, TradeInfo, JobEvent, LeaveRequest, WorkReport, WorkPlace, Role, WarehouseSite, WorkDay, FixedAsset, Investor, InvestorTxnKind, Attachment, ChangeArea, ChangeNote, Currency, ExpenseAccount, ExpenseEntry, TaxKind, TaxPayment, TaxRate, AccountHead, AttachTarget,
 } from './types'
 
 const tick = (d: Db) => ++d.seq.ts
@@ -212,11 +214,18 @@ export const actions = {
    * it is part of the product's cost, the cost per unit becomes the average of what was in stock and
    * this shipment at its order rate plus freight.
    */
-  receiveShipment(d: Db, p: { orderId: string; date: ISODate; challan: string; qty: number; damaged: number; note: string; freight?: number; freightInCost?: boolean; method?: string; siteId?: string }) {
+  receiveShipment(d: Db, p: { orderId: string; date: ISODate; challan: string; qty: number; damaged: number; note: string; freight?: number; freightInCost?: boolean; method?: string; siteId?: string; by?: string }) {
     const o = mustFind(d.factoryOrders, p.orderId, 'Factory order')
+    const due = o.qty - o.receipts.reduce((s, r) => s + r.qty, 0)
+    if (!(p.qty > 0)) throw new Error('Enter the quantity received')
+    if (p.qty > due + 1e-9) throw new Error(`Only ${fmt(Math.max(due, 0))} are still due on ${o.id}; change the order first if the factory sent more`)
+    if ((p.damaged || 0) < 0) throw new Error('Damaged cannot be negative')
+    if (!p.date) throw new Error('Pick the date the goods came in')
+    if (p.date > todayISO()) throw new Error('The date cannot be in the future')
+    if (p.date < o.placed) throw new Error(`The goods cannot come in before the order was placed, ${fdate(o.placed)}`)
     const id = uid(d, 'fr')
     const freight = p.freight && p.freight > 0 ? p.freight : 0
-    o.receipts.push({ id, ts: tick(d), date: p.date, challan: p.challan, qty: p.qty, damaged: p.damaged, note: p.note, freight: freight || undefined, freightInCost: freight ? !!p.freightInCost : undefined, siteId: siteOk(d, p.siteId) })
+    o.receipts.push({ id, ts: tick(d), date: p.date, challan: p.challan, qty: p.qty, damaged: p.damaged, note: p.note, freight: freight || undefined, freightInCost: freight ? !!p.freightInCost : undefined, siteId: siteOk(d, p.siteId), by: p.by || undefined })
     if (freight) {
       d.expenses.push({ id: uid(d, 'ex'), ts: tick(d), date: p.date, head: TRANSPORT_HEAD, amount: freight, method: p.method || 'Cash',
         details: `Freight to warehouse · ${o.id}${p.challan ? ` · ${p.challan}` : ''}`, transport: { kind: 'Freight to warehouse', orderId: o.id } })
@@ -255,6 +264,11 @@ export const actions = {
   saveWarehouse(d: Db, p: Omit<WarehouseSite, 'id'> & { id?: string }) {
     if (!p.name.trim()) throw new Error('Name the warehouse, e.g. Main godown, Chattogram')
     const list = (d.warehouses ??= [])
+    const code = (p.code || '').trim().toUpperCase()
+    if (code && !/^[A-Z0-9][A-Z0-9-]{1,11}$/.test(code)) throw new Error('A warehouse code is 2 to 12 letters, digits or dashes, e.g. TNG-01')
+    const clash = code && list.find((w) => w.id !== p.id && (w.code || '').toUpperCase() === code)
+    if (clash) throw new Error(`${clash.name} already has the code ${code}`)
+    p = { ...p, code: code || undefined }
     if (p.main || !list.length) for (const w of list) delete w.main
     const cur = byId(list, p.id)
     if (cur) {
@@ -293,15 +307,56 @@ export const actions = {
     }
     d.stockTransfers = (d.stockTransfers || []).filter((x) => x.id !== id)
   },
-  newPurchase(d: Db, p: { supplierId: string; billNo: string; date: ISODate; productId: string; qty: number; rate: number; terms: SupplierTerms; paid: number; method: string; tax?: number; attachments?: Attachment[]; siteId?: string }) {
+  /**
+   * A supplier's bill. With `pending` the goods wait in "To receive" until the warehouse confirms them
+   * (confirmPurchase); otherwise they go into stock at once.
+   */
+  newPurchase(d: Db, p: { supplierId: string; billNo: string; date: ISODate; productId: string; qty: number; rate: number; terms: SupplierTerms; paid: number; method: string; tax?: number; attachments?: Attachment[]; siteId?: string; pending?: boolean; expected?: ISODate; by?: string }) {
+    mustFind(d.suppliers, p.supplierId, 'Supplier')
+    const prod = mustFind(d.products, p.productId, 'Product')
+    if (!(p.qty > 0) || !(p.rate > 0)) throw new Error('Enter the quantity and the rate')
+    if ((p.tax || 0) < 0) throw new Error('VAT cannot be negative')
+    if (!p.date) throw new Error('Pick the bill date')
+    if (p.expected && p.expected < p.date) throw new Error('The goods cannot be due before the bill date')
+    const billNo = p.billNo.trim()
+    if (billNo && d.purchases.some((x) => x.supplierId === p.supplierId && x.billNo.trim().toLowerCase() === billNo.toLowerCase())) throw new Error(`Bill ${billNo} from this supplier is already entered`)
     const id = uid(d, 'pur')
     d.seq.pb++
-    if ((p.tax || 0) < 0) throw new Error('VAT cannot be negative')
-    d.purchases.push({ id, billNo: p.billNo, ts: tick(d), supplierId: p.supplierId, date: p.date, productId: p.productId, qty: p.qty, rate: p.rate, terms: p.terms, tax: p.tax || undefined, siteId: siteOk(d, p.siteId) })
-    const prod = mustFind(d.products, p.productId, 'Product')
-    prod.stock += p.qty
-    prod.cost = p.rate
+    d.purchases.push({ id, billNo: p.billNo, ts: tick(d), supplierId: p.supplierId, date: p.date, productId: p.productId, qty: p.qty, rate: p.rate, terms: p.terms, tax: p.tax || undefined, siteId: siteOk(d, p.siteId), pending: p.pending || undefined, expected: p.pending ? p.expected || undefined : undefined, by: p.by || undefined })
+    if (!p.pending) {
+      prod.stock += p.qty
+      prod.cost = p.rate
+    }
     if (p.paid > 0) d.supplierPayments.push({ id: uid(d, 'sp'), ts: tick(d), supplierId: p.supplierId, purchaseId: id, date: p.date, amount: p.paid, method: p.method, note: 'Paid on purchase', attachments: p.attachments })
+  },
+  /**
+   * The warehouse has counted a supplier's goods in. Anything short or damaged stays out of stock and is
+   * noted on the bill. Who may do this (an admin or someone with warehouse edit access) is checked by the server.
+   */
+  confirmPurchase(d: Db, p: { purchaseId: string; date: ISODate; siteId?: string; short?: number; note?: string; by: string }) {
+    const x = mustFind(d.purchases, p.purchaseId, 'Purchase')
+    if (!x.pending) throw new Error(`Bill ${x.billNo} was already received${x.recv ? ` on ${fdate(x.recv.date)} by ${x.recv.by}` : ''}`)
+    if (!p.date) throw new Error('Pick the date the goods came in')
+    if (p.date > todayISO()) throw new Error('The date cannot be in the future')
+    if (p.date < x.date) throw new Error(`The goods cannot come in before the bill date, ${fdate(x.date)}`)
+    const short = p.short || 0
+    const prod = mustFind(d.products, x.productId, 'Product')
+    if (short < 0) throw new Error('Short or damaged cannot be negative')
+    if (short >= x.qty) throw new Error(`Short or damaged must be less than the ${fmt(x.qty)} ${prod.unit} on the bill; if nothing usable came, cancel the bill instead`)
+    if (short && !(p.note || '').trim()) throw new Error('Say what was short or damaged in the note')
+    if (p.siteId !== undefined) x.siteId = siteOk(d, p.siteId)
+    x.pending = undefined
+    x.expected = undefined
+    x.recv = { date: p.date, by: p.by, short: short || undefined, note: (p.note || '').trim().slice(0, 500) || undefined }
+    prod.stock += x.qty - short
+    prod.cost = x.rate
+  },
+  /** Cancel a supplier's bill whose goods never came. Only while it waits for the warehouse and nothing is paid on it. */
+  cancelPurchase(d: Db, purchaseId: string) {
+    const x = mustFind(d.purchases, purchaseId, 'Purchase')
+    if (!x.pending) throw new Error(`Bill ${x.billNo} is already in stock; return the goods to the supplier instead`)
+    if (d.supplierPayments.some((sp) => sp.purchaseId === x.id)) throw new Error(`Money was paid on bill ${x.billNo}; settle it with the supplier first`)
+    d.purchases = d.purchases.filter((y) => y.id !== x.id)
   },
   paySupplier(d: Db, p: { supplierId: string; purchaseId: string; date: ISODate; amount: number; method: string; note: string; attachments?: Attachment[] }) {
     d.supplierPayments.push({ id: uid(d, 'sp'), ts: tick(d), supplierId: p.supplierId, purchaseId: p.purchaseId, date: p.date, amount: p.amount, method: p.method, note: p.note, attachments: p.attachments })
@@ -316,12 +371,155 @@ export const actions = {
     const id = exp ? 'EXP-' + String(d.seq.exp++).padStart(3, '0') : 'IMP-' + String(d.seq.imp++).padStart(3, '0')
     d.imports.unshift({ ...rest, id, ts: tick(d), costs: [], steps })
   },
-  addImportCost(d: Db, p: { importId: string; type: string; amount: number; method: string; date: ISODate }) {
-    mustFind(d.imports, p.importId, 'Shipment').costs.push({ id: uid(d, 'ic'), ts: tick(d), type: p.type, amount: p.amount, method: p.method, date: p.date })
+  addImportCost(d: Db, p: { importId: string; type: string; amount: number; method: string; date: ISODate; group?: CostGroup; recoverable?: boolean; note?: string }) {
+    if (!(p.amount > 0)) throw new Error('Enter the amount')
+    mustFind(d.imports, p.importId, 'Shipment').costs.push({ id: uid(d, 'ic'), ts: tick(d), type: p.type, amount: p.amount, method: p.method, date: p.date, group: p.group || groupOf(p.type), recoverable: p.recoverable || undefined, note: p.note?.trim() || undefined })
   },
-  markImportStep(d: Db, p: { importId: string; key: StepKey; date: ISODate; siteId?: string }) {
+  removeImportCost(d: Db, p: { importId: string; costId: string }) {
     const s = mustFind(d.imports, p.importId, 'Shipment')
-    s.steps[p.key] = { date: p.date }
+    s.costs = s.costs.filter((c) => c.id !== p.costId)
+  },
+  /** Transport, terms, LC and export details of a shipment. */
+  saveTrade(d: Db, p: { importId: string; trade: TradeInfo; lcNo?: string; bank?: string; usd?: number; rate?: number; supplier?: string; country?: string }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    const t = p.trade
+    if (!INCOTERMS[t.incoterm]) throw new Error('Pick the Incoterm')
+    if (!PAYMENT_TERMS[t.payment]) throw new Error('Pick the payment terms')
+    if (INCOTERMS[t.incoterm].seaOnly && t.mode !== 'sea') throw new Error(`${t.incoterm} is for sea shipments; use ${t.incoterm === 'FOB' ? 'FCA' : t.incoterm === 'CIF' ? 'CIP' : t.incoterm === 'CFR' ? 'CPT' : 'FCA'} for ${MODES[t.mode].label.toLowerCase()}`)
+    if (t.etd && t.eta && t.eta < t.etd) throw new Error('Arrival is before departure')
+    if (t.lc?.expiry && t.lc.lastShipment && t.lc.lastShipment > t.lc.expiry) throw new Error('The last shipment date is after the LC expiry')
+    if ((t.lc?.marginPct ?? 0) < 0 || (t.lc?.marginPct ?? 0) > 100) throw new Error('LC margin is a percent from 0 to 100')
+    if (p.usd != null && !(p.usd > 0)) throw new Error('Enter the invoice value')
+    if (p.rate != null && !(p.rate > 0)) throw new Error('Enter the exchange rate')
+    s.trade = { ...t, containers: t.containers.filter((c) => c.no.trim()).map((c) => ({ ...c, no: c.no.trim().toUpperCase(), seal: c.seal.trim() })), events: t.events || s.trade?.events || [] }
+    if (p.lcNo != null) s.lcNo = p.lcNo.trim()
+    if (p.bank != null) s.bank = p.bank.trim()
+    if (p.usd != null) s.usd = p.usd
+    if (p.rate != null) s.rate = p.rate
+    if (p.supplier != null) s.supplier = p.supplier.trim()
+    if (p.country != null) s.country = p.country.trim()
+    // the customs papers follow the port of arrival or loading
+    const home = s.direction === 'export' ? t.loadPort : t.dischargePort
+    if (home) s.customs = { ...(s.customs || { stages: {}, docs: {}, rates: {} }), port: home }
+  },
+  /** A line in the tracking timeline: sailed, transhipped at Colombo, berthed, at the land port… */
+  addTrackEvent(d: Db, p: { importId: string; date: ISODate; place: string; text: string }) {
+    if (!p.text.trim()) throw new Error('Say what happened')
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    s.trade = { ...defaultTrade(s.direction), ...s.trade }
+    s.trade.events = [...(s.trade.events || []), { id: uid(d, 'te'), date: p.date, place: p.place.trim(), text: p.text.trim() }].sort((a, b) => (a.date < b.date ? -1 : 1))
+  },
+  removeTrackEvent(d: Db, p: { importId: string; eventId: string }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    if (s.trade) s.trade.events = s.trade.events.filter((e) => e.id !== p.eventId)
+  },
+  /**
+   * Pay the assessed duty: one cost line per duty. CD, RD and SD stay in the goods' cost; VAT, AT and
+   * AIT are marked recoverable when the importer claims them back.
+   */
+  postDuties(d: Db, p: { importId: string; date: ISODate; method: string; replace?: boolean }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    if (s.direction === 'export') throw new Error('Exports do not pay import duty')
+    const already = s.costs.filter((c) => (c.group || groupOf(c.type)) === 'duty')
+    if (already.length && !p.replace) throw new Error('Duty is already in the costs. Replace it?')
+    const calc = computeDuties(d, s)
+    if (!calc.duties.length) throw new Error('Set the duty rates first')
+    if (calc.suspended) throw new Error('Duty and VAT are suspended for goods in a free zone or in transit; record them when the goods leave for the local market')
+    s.costs = s.costs.filter((c) => !already.includes(c))
+    const note = `AV ${Math.round(calc.av)}`
+    if (calc.deposit > 0) {
+      // re-export: the duty is a deposit, paid now and refunded when the goods leave the country
+      s.costs.push({ id: uid(d, 'ic'), ts: tick(d), date: p.date, type: 'Customs deposit (refundable)', amount: calc.deposit, method: p.method, group: 'duty', recoverable: true, note })
+    } else {
+      const claim = s.trade?.claimTax ?? true
+      const back = regimeOf(d).recoverable
+      for (const x of calc.duties) {
+        if (x.amount <= 0) continue
+        s.costs.push({ id: uid(d, 'ic'), ts: tick(d), date: p.date, type: x.label, amount: x.amount, method: p.method, group: 'duty', recoverable: (claim && back.includes(x.key)) || undefined, note: `${x.rate}% · ${note}` })
+      }
+    }
+    s.customs = { ...(s.customs || { stages: {}, docs: {}, rates: {} }), stages: { ...(s.customs?.stages || {}), duty: s.customs?.stages?.duty || p.date } }
+  },
+  /** The customs deposit for re-exported goods came back. */
+  refundDeposit(d: Db, p: { importId: string; costId: string; date: ISODate }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    const c = mustFind(s.costs, p.costId, 'Cost')
+    if (!/deposit/i.test(c.type)) throw new Error('Only a customs deposit can be refunded')
+    if (c.refundedOn) throw new Error('Already refunded')
+    if (p.date < c.date) throw new Error('The refund is before the deposit')
+    c.refundedOn = p.date
+  },
+  /** Change one cost line. */
+  updateImportCost(d: Db, p: { importId: string; costId: string; type: string; amount: number; method: string; date: ISODate; note: string; group?: CostGroup; recoverable?: boolean }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    const c = mustFind(s.costs, p.costId, 'Cost')
+    if (!(p.amount > 0)) throw new Error('Enter the amount')
+    if (!p.type.trim()) throw new Error('Name the cost')
+    Object.assign(c, { type: p.type.trim(), amount: p.amount, method: p.method, date: p.date, note: p.note.trim() || undefined, group: p.group || groupOf(p.type), recoverable: p.recoverable || undefined })
+  },
+  updateTrackEvent(d: Db, p: { importId: string; eventId: string; date: ISODate; place: string; text: string }) {
+    if (!p.text.trim()) throw new Error('Say what happened')
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    const e = mustFind(s.trade?.events || [], p.eventId, 'Update')
+    Object.assign(e, { date: p.date, place: p.place.trim(), text: p.text.trim() })
+    s.trade!.events.sort((a, b) => (a.date < b.date ? -1 : 1))
+  },
+  /** Goods, quantity, unit and HS code — while no stock has moved for this shipment. */
+  saveShipmentBasics(d: Db, p: { importId: string; productId: string; productName: string; qty: number; unit: string; hsCode: string }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    const moved = s.direction === 'export' ? !!s.steps.shipped?.date : !!s.steps.warehouse?.date
+    if (moved && (p.productId !== s.productId || p.qty !== s.qty)) throw new Error(s.direction === 'export' ? 'The goods have left stock; the item and quantity can no longer change' : 'The goods are in stock; the item and quantity can no longer change')
+    if (!(p.qty > 0)) throw new Error('Enter the quantity')
+    const prod = p.productId ? mustFind(d.products, p.productId, 'Product') : null
+    if (!prod && !p.productName.trim()) throw new Error('Say what is being shipped')
+    Object.assign(s, { productId: prod?.id || '', productName: prod?.name || p.productName.trim(), qty: p.qty, unit: prod?.unit || p.unit })
+    s.customs = { ...(s.customs || { stages: {}, docs: {}, rates: {} }), hsCode: p.hsCode.trim() }
+  },
+  /** Change when a step happened or is expected; a step that moved stock keeps its date. */
+  setStepDate(d: Db, p: { importId: string; key: StepKey; date?: ISODate; expected?: ISODate; note?: string }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    const cur = s.steps[p.key]
+    if (!cur) throw new Error('No such step')
+    const stock = (s.direction === 'export' && p.key === 'shipped') || (s.direction !== 'export' && p.key === 'warehouse')
+    if (stock && cur.date && !p.date) throw new Error('This step moved stock; it cannot be undone here. Adjust stock instead.')
+    if (!stock && !cur.date && p.date) throw new Error('Use Mark done to complete a step')
+    if (p.date && p.date > todayISO()) throw new Error('A done step cannot be in the future')
+    if (p.date && cur.date) stepInOrder(s, p.key, p.date)
+    const keep = cur.date && p.date ? { note: p.note !== undefined ? p.note.trim() || undefined : cur.note, by: cur.by } : {}
+    s.steps[p.key] = { date: cur.date ? p.date : undefined, expected: p.expected || undefined, ...keep }
+  },
+  /** Drop a shipment that has not moved stock. Its costs leave the cashbook with it. */
+  removeShipment(d: Db, id: string) {
+    const s = mustFind(d.imports, id, 'Shipment')
+    if (s.direction === 'export' ? s.steps.shipped?.date : s.steps.warehouse?.date) throw new Error('Goods of this shipment have moved stock; it cannot be removed')
+    if ((d.trips || []).some((t) => t.shipmentId === id)) throw new Error('A transport trip is booked for this shipment; remove the trip first')
+    if (d.imports.some((x) => x.trade?.sourceImportId === id)) throw new Error('A re-export is linked to this shipment')
+    d.imports = d.imports.filter((x) => x.id !== id)
+  },
+  /** Export money received at the bank (all or part). Fully received marks the shipment paid. */
+  realiseExport(d: Db, p: { importId: string; date: ISODate; amountFc: number; rate: number; bankCharge?: number; method?: string }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    if (s.direction !== 'export') throw new Error('Only exports have proceeds to realise')
+    if (!(p.amountFc > 0) || !(p.rate > 0)) throw new Error('Enter the amount received and the rate')
+    const t = { ...defaultTrade('export'), ...s.trade }
+    const before = t.realisedFc || 0
+    if (before + p.amountFc > s.usd * 1.05) throw new Error(`That is more than the ${t.currency} ${s.usd} invoiced`)
+    t.realisedRate = Math.round((((t.realisedRate || p.rate) * before + p.rate * p.amountFc) / (before + p.amountFc)) * 100) / 100
+    t.realisedFc = Math.round((before + p.amountFc) * 100) / 100
+    t.realisedOn = p.date
+    s.trade = t
+    if (p.bankCharge && p.bankCharge > 0) s.costs.push({ id: uid(d, 'ic'), ts: tick(d), date: p.date, type: 'Export bill collection charge', amount: p.bankCharge, method: p.method || 'Bank transfer', group: 'bank' })
+    if (t.realisedFc >= s.usd - 0.01 && !s.steps.paid?.date) s.steps.paid = { date: p.date }
+  },
+  /** Confirm a step of an import or export, with the day it happened and an optional note. Steps go in order. */
+  markImportStep(d: Db, p: { importId: string; key: StepKey; date: ISODate; siteId?: string; note?: string; by?: string }) {
+    const s = mustFind(d.imports, p.importId, 'Shipment')
+    if (!stepKeys(s).includes(p.key)) throw new Error('No such step')
+    if (s.steps[p.key]?.date) throw new Error(`“${stepLabel(p.key, s)}” is already done`)
+    if (!p.date) throw new Error('Pick the date')
+    if (p.date > todayISO()) throw new Error('A done step cannot be in the future')
+    stepInOrder(s, p.key, p.date)
+    s.steps[p.key] = { date: p.date, expected: s.steps[p.key]?.expected, note: p.note?.trim().slice(0, 500) || undefined, by: p.by || undefined }
     if (p.key === 'warehouse' && s.direction !== 'export') s.siteId = siteOk(d, p.siteId)
     const prod = byId(d.products, s.productId)
     if (!prod) return
@@ -343,10 +541,16 @@ export const actions = {
     const cu = customsOf(mustFind(d.imports, p.importId, 'Shipment'))
     cu.docs[p.name] = !cu.docs[p.name]
   },
-  markCustomsStage(d: Db, p: { importId: string; key: CustomsStage; date: ISODate }) {
+  markCustomsStage(d: Db, p: { importId: string; key: CustomsStage; date: ISODate; note?: string; by?: string }) {
     const s = mustFind(d.imports, p.importId, 'Shipment')
-    customsOf(s).stages[p.key] = p.date
-    if (p.key === 'release' && !s.steps.customs?.date) s.steps.customs = { date: p.date }
+    if (p.date > todayISO()) throw new Error('A done stage cannot be in the future')
+    const cu = customsOf(s)
+    const order = customsStages(s).map(([k]) => k)
+    const before = order.slice(0, order.indexOf(p.key)).map((k) => cu.stages[k]).filter((x): x is ISODate => !!x).sort().pop()
+    if (before && p.date < before) throw new Error(`This stage cannot be before the one done on ${fdate(before)}`)
+    cu.stages[p.key] = p.date
+    if (p.note?.trim() || p.by) cu.stageNotes = { ...cu.stageNotes, [p.key]: { note: p.note?.trim().slice(0, 500) || undefined, by: p.by || undefined } }
+    if (p.key === 'release' && !s.steps.customs?.date) s.steps.customs = { date: p.date, note: p.note?.trim().slice(0, 500) || undefined, by: p.by || undefined }
   },
 
   saveDealer(d: Db, p: Omit<Dealer, 'id'> & { id?: string }) {
@@ -555,6 +759,10 @@ export const actions = {
     if (p.payType === 'daily' && !(p.dailyRate && p.dailyRate > 0)) throw new Error('Enter the daily wage')
     if (p.payType === 'contract' && !(p.contract && p.contract.amount > 0)) throw new Error('Enter the contract amount')
     const cur = byId(d.employees, p.id)
+    // a manager chain must not loop back to the person
+    for (let m = p.managerId, hops = 0; m; m = byId(d.employees, m)?.managerId, hops++) {
+      if ((cur && m === cur.id) || hops > 50) throw new Error('That manager reports to this person; pick someone else')
+    }
     const day = todayISO()
     const ev = (kind: JobEvent['kind'], text: string, date = day): JobEvent => ({ id: uid(d, 'jh'), date, kind, text })
     const payText = (e: Pick<Employee, 'payType' | 'salary' | 'rate' | 'dailyRate' | 'contract'>) =>
@@ -651,6 +859,55 @@ export const actions = {
     t.cancelled = true
     const e = byId(d.employees, t.employeeId)
     if (e) (e.history ??= []).push({ id: uid(d, 'jh'), date: p.today, kind: 'transfer', text: `Transfer ${t.id} cancelled` })
+  },
+  /** An employee sends a written report (new), or edits one still waiting or sent back for changes. */
+  submitReport(d: Db, p: { employeeId: string; id?: string; kind: WorkReport['kind']; from: ISODate; to: ISODate; title: string; body: string; attachments: Attachment[]; by: string; at: string }) {
+    const e = mustFind(d.employees, p.employeeId, 'Employee')
+    if (e.status === 'left') throw new Error('This person has left')
+    if (!p.title.trim()) throw new Error('Give the report a title')
+    if (p.body.trim().length < 10) throw new Error('Write the report (at least a sentence)')
+    if (p.body.length > 20000) throw new Error('The report is too long; attach a file instead')
+    if (!p.from || !p.to || p.to < p.from) throw new Error('The period ends before it starts')
+    if (p.from > todayISO()) throw new Error('A report cannot be for a future period')
+    if (p.attachments.length > 10) throw new Error('Attach at most 10 files')
+    const list = (d.workReports ??= [])
+    if (p.id) {
+      const r = mustFind(list, p.id, 'Report')
+      if (r.employeeId !== e.id) throw new Error('That is not your report')
+      if (r.status !== 'submitted' && r.status !== 'changes') throw new Error('This report has been reviewed; write a new one or reply instead')
+      const resent = r.status === 'changes'
+      Object.assign(r, { kind: p.kind, from: p.from, to: p.to, title: p.title.trim(), body: p.body.trim(), attachments: p.attachments, status: 'submitted', version: r.version + 1 })
+      r.replies.push({ id: uid(d, 'rr'), at: p.at, by: p.by, byEmployee: e.id, text: resent ? 'Changed the report and sent it again.' : 'Edited the report.', status: 'submitted' })
+      return
+    }
+    const n = Math.max(0, ...list.map((r) => Number(r.id.slice(3)) || 0)) + 1
+    list.push({ id: 'WR-' + String(n).padStart(3, '0'), employeeId: e.id, kind: p.kind, from: p.from, to: p.to, title: p.title.trim(), body: p.body.trim(), attachments: p.attachments, status: 'submitted', submittedAt: p.at, version: 1, replies: [] })
+  },
+  /** The writer takes back a report nobody has reviewed yet. */
+  withdrawReport(d: Db, p: { id: string; employeeId: string; by: string; at: string }) {
+    const r = mustFind(d.workReports || [], p.id, 'Report')
+    if (r.employeeId !== p.employeeId) throw new Error('That is not your report')
+    if (r.status !== 'submitted') throw new Error('Only a report still waiting can be withdrawn')
+    r.status = 'withdrawn'
+    r.replies.push({ id: uid(d, 'rr'), at: p.at, by: p.by, byEmployee: p.employeeId, text: 'Withdrew the report.', status: 'withdrawn' })
+  },
+  /** A manager or the office marks it seen, approves it, or asks for changes (with a note). */
+  reviewReport(d: Db, p: { id: string; status: 'reviewed' | 'approved' | 'changes'; comment: string; attachments?: Attachment[]; by: string; byEmployee?: string; at: string }) {
+    const r = mustFind(d.workReports || [], p.id, 'Report')
+    if (r.status === 'withdrawn') throw new Error('This report was withdrawn')
+    if (p.byEmployee && p.byEmployee === r.employeeId) throw new Error('You cannot review your own report')
+    if (p.status === 'changes' && !p.comment.trim()) throw new Error('Say what should change')
+    r.status = p.status
+    r.reviewedBy = p.by
+    r.reviewedAt = p.at
+    r.replies.push({ id: uid(d, 'rr'), at: p.at, by: p.by, byEmployee: p.byEmployee, text: p.comment.trim(), attachments: p.attachments?.length ? p.attachments : undefined, status: p.status })
+  },
+  /** A note on a report, from the writer or a reviewer, with files if needed. */
+  replyReport(d: Db, p: { id: string; text: string; attachments?: Attachment[]; by: string; byEmployee?: string; at: string }) {
+    const r = mustFind(d.workReports || [], p.id, 'Report')
+    if (!p.text.trim() && !p.attachments?.length) throw new Error('Write something or attach a file')
+    if (r.replies.length >= 200) throw new Error('This conversation is full; start a new report')
+    r.replies.push({ id: uid(d, 'rr'), at: p.at, by: p.by, byEmployee: p.byEmployee, text: p.text.trim(), attachments: p.attachments?.length ? p.attachments : undefined })
   },
   /** An employee asks for leave. Anyone may ask for themselves; the admin approves or declines. */
   requestLeave(d: Db, p: { employeeId: string; kind: LeaveRequest['kind']; from: ISODate; to: ISODate; half?: boolean; reason: string; by: string; at: string }) {
@@ -1107,6 +1364,20 @@ export type ActionPayload<K extends ActionName> = Parameters<Actions[K]>[1]
 
 /** Apply one action to a copy of the books and return the copy. The original is never changed. */
 /** A warehouse id that exists, or nothing (the main one). */
+/** A step's date must not be before an earlier step's, nor after a later one's. */
+function stepInOrder(s: Shipment, key: StepKey, date: ISODate) {
+  const keys = stepKeys(s)
+  const i = keys.indexOf(key)
+  for (const k of keys.slice(0, i)) {
+    const at = s.steps[k]?.date
+    if (at && date < at) throw new Error(`“${stepLabel(key, s)}” cannot be before “${stepLabel(k, s)}” on ${fdate(at)}`)
+  }
+  for (const k of keys.slice(i + 1)) {
+    const at = s.steps[k]?.date
+    if (at && date > at) throw new Error(`“${stepLabel(key, s)}” cannot be after “${stepLabel(k, s)}” on ${fdate(at)}`)
+  }
+}
+
 function siteOk(d: Db, id?: string): string | undefined {
   return id && (d.warehouses || []).some((w) => w.id === id) ? id : undefined
 }

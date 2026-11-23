@@ -5,11 +5,11 @@ const IMPORT_STEPS: StepKey[] = ['lc', 'shipped', 'port', 'customs', 'warehouse'
 const EXPORT_STEPS: StepKey[] = ['contract', 'ready', 'customs', 'shipped', 'paid']
 export const stepKeys = (s: Pick<Shipment, 'direction'>): StepKey[] => (s.direction === 'export' ? EXPORT_STEPS : IMPORT_STEPS)
 
-export function stepLabel(key: StepKey, s: Pick<Shipment, 'direction' | 'country' | 'customs'>): string {
+export function stepLabel(key: StepKey, s: Pick<Shipment, 'direction' | 'country' | 'customs'> & { trade?: Shipment['trade'] }): string {
   const exp = s.direction === 'export'
   const labels: Record<StepKey, string> = {
-    lc: 'LC opened at bank',
-    contract: 'Export LC or contract received',
+    lc: !s.trade || s.trade.payment.startsWith('lc') ? 'LC opened at bank' : s.trade.payment === 'tt-advance' ? 'TT sent in advance' : 'Order confirmed',
+    contract: !s.trade || s.trade.payment.startsWith('lc') ? 'Export LC or contract received' : 'Order / contract received',
     ready: 'Goods ready and packed',
     shipped: exp ? `Shipped to ${s.country || 'buyer'}` : `Shipped from ${s.country || 'origin'}`,
     port: `Arrived at ${s.customs?.port || 'port'}`,
@@ -51,14 +51,18 @@ export function computeShipment(db: Db, s: Shipment): ShipmentCalc {
   const exp = s.direction === 'export'
   const keys = stepKeys(s)
   const invoiceTk = s.usd * s.rate
-  const extra = sum(s.costs, (c) => c.amount)
+  // VAT, AT and AIT claimed back are not part of what the goods cost
+  const extra = sum(s.costs.filter((c) => !c.recoverable), (c) => c.amount)
   const product = s.productId ? byId(db.products, s.productId) : undefined
   const done = keys.filter((k) => s.steps[k]?.date)
   const last = done[done.length - 1]
   let status: [string, Tone] = last ? STATUS[last] : ['Planned', 'neutral']
   if (exp && last === 'customs') status = ['Cleared', 'info']
   if (exp && last === 'shipped') status = ['Shipped', 'warn']
-  const goodsCost = exp ? s.qty * (s.unitCost ?? product?.cost ?? 0) : 0
+  // a re-export costs what the goods landed at on the import they came in on
+  const source = exp && s.trade?.sourceImportId ? db.imports.find((x) => x.id === s.trade?.sourceImportId && x.direction !== 'export') : undefined
+  const sourceUnit = source ? computeShipment(db, source).perUnit : undefined
+  const goodsCost = exp ? s.qty * (s.unitCost ?? sourceUnit ?? product?.cost ?? 0) : 0
   const landed = exp ? extra : invoiceTk + extra
   return {
     exp, keys, invoiceTk, extra, landed, goodsCost, margin: exp ? invoiceTk - extra - goodsCost : 0,

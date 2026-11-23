@@ -1,13 +1,15 @@
 import { customsCalc, DUTY_COST_TYPE, fdate, tk, todayISO, type Shipment } from '@shared/domain'
 import { useBooks } from '@/core/store/context'
-import { Button, Card, Pill, useSheets, useToast } from '@/ui'
+import { Button, Card, Pill, useConfirm, useSheets, useToast } from '@/ui'
 import { CustomsDetailsSheet } from './CustomsDetailsSheet'
+import { CustomsStageSheet } from './CustomsStageSheet'
 
 /** Stages, documents, references and the duty estimate for one shipment. */
 export function CustomsCard({ shipment: s }: { shipment: Shipment }) {
   const { db, act } = useBooks()
   const sheets = useSheets()
   const toast = useToast()
+  const confirm = useConfirm()
   const c = customsCalc(db, s)
   const cu = c.cu
   const exp = s.direction === 'export'
@@ -16,10 +18,16 @@ export function CustomsCard({ shipment: s }: { shipment: Shipment }) {
     [exp ? 'Bill of Export' : 'Bill of Entry', cu.boeNo && `${cu.boeNo}${cu.boeDate ? ` · ${fdate(cu.boeDate)}` : ''}`],
   ] as const).filter(([, v]) => v)
 
-  const postDuty = () => {
-    act('addImportCost', { importId: s.id, type: DUTY_COST_TYPE, amount: c.dutyTotal, method: 'Bank transfer', date: todayISO() })
-    act('markCustomsStage', { importId: s.id, key: 'duty', date: todayISO() })
-    toast(`${tk(c.dutyTotal)} duty paid and added to ${exp ? 'export costs' : 'landed cost'}`)
+  const postDuty = async () => {
+    if (exp) {
+      act('addImportCost', { importId: s.id, type: DUTY_COST_TYPE, amount: c.dutyTotal, method: 'Bank transfer', date: todayISO() })
+      act('markCustomsStage', { importId: s.id, key: 'duty', date: todayISO() })
+      return toast(`${tk(c.dutyTotal)} added to export costs`)
+    }
+    const posted = s.costs.some((x) => x.group === 'duty' || x.type === DUTY_COST_TYPE)
+    if (posted && !(await confirm({ title: 'Duty is already in the costs', message: 'Replace it with the duty worked out now?', confirmLabel: 'Replace' }))) return
+    const why = act('postDuties', { importId: s.id, date: todayISO(), method: 'Bank transfer', replace: posted })
+    if (!why) toast(`${tk(c.dutyTotal)} duty paid: ${tk(c.costDuty)} added to landed cost, ${tk(c.recoverable)} VAT/AT/AIT to claim back`)
   }
 
   return (
@@ -36,10 +44,10 @@ export function CustomsCard({ shipment: s }: { shipment: Shipment }) {
           <div className="rows">
             {c.stages.map(([k, label]) => (
               <div key={k} className="row step">
-                <span className="name">{label}</span>
+                <span className="name">{label}{cu.stageNotes?.[k]?.note && <small className="t-muted step-note">“{cu.stageNotes[k]?.note}”{cu.stageNotes[k]?.by ? ` — ${cu.stageNotes[k]?.by}` : ''}</small>}</span>
                 <span className="meta t-muted">{fdate(c.dates[k])}</span>
                 {c.dates[k] ? <Pill tone="good">Done</Pill>
-                  : c.next?.[0] === k ? <Button variant="secondary" size="sm" className="edit-only" onClick={() => act('markCustomsStage', { importId: s.id, key: k, date: todayISO() })}>Mark done</Button>
+                  : c.next?.[0] === k ? <Button variant="secondary" size="sm" className="edit-only" onClick={() => sheets.open(CustomsStageSheet, { importId: s.id, stage: k })}>Mark done…</Button>
                   : <Pill tone="neutral">Waiting</Pill>}
               </div>
             ))}
@@ -68,7 +76,7 @@ export function CustomsCard({ shipment: s }: { shipment: Shipment }) {
             {!c.dates.duty && (
               <div className="kv edit-only">
                 <span className="t-muted">When paid, this adds the amount to the shipment costs and the cashbook.</span>
-                <Button size="sm" onClick={postDuty}>Record duty paid</Button>
+                <Button size="sm" onClick={() => void postDuty()}>Record duty paid</Button>
               </div>
             )}
           </>

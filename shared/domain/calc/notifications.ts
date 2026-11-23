@@ -15,6 +15,7 @@ import { investorRows } from './investors'
 import { isLowStock } from './products'
 import { supplierLedger } from './suppliers'
 import { tradeOverview } from './trade'
+import { tradeAlerts } from './tradeTerms'
 import { paperAlerts, servicesDue } from './transport'
 
 export type NoticeTone = 'warn' | 'info' | 'good'
@@ -166,6 +167,25 @@ export const notifications = (db: Db, today: ISODate = todayISO()): Notice[] =>
         title: `${failed.length} message${failed.length === 1 ? '' : 's'} failed to send`, body: failed[0].error || 'Check the number or the SMS/WhatsApp settings.' })
     }
 
+    // import and export: LC expiry, last shipment dates, late vessels, usance payments, export proceeds
+    for (const x of tradeAlerts(db, today)) {
+      add({ id: 'trade:' + x.id, kind: 'trade', tone: x.tone, rank: x.tone === 'warn' ? 75 : 45, page: 'trade', to: 'trade/' + x.shipmentId, title: `${x.shipmentId}: ${x.text}`, body: 'Open the shipment to act on it.' })
+    }
+    // written reports: new ones for the office and the line manager, answers for the writer
+    for (const r of db.workReports || []) {
+      const who = db.employees.find((e) => e.id === r.employeeId)?.name || 'Someone'
+      if (r.status === 'submitted') {
+        const body = `${r.title}${r.attachments.length ? ` · ${r.attachments.length} file${r.attachments.length === 1 ? '' : 's'}` : ''}`
+        add({ id: `report:new:${r.id}:${r.version}`, kind: 'people', tone: r.kind === 'incident' ? 'warn' : 'info', rank: r.kind === 'incident' ? 70 : 50, page: 'staff-reports', to: 'staff-reports', date: r.submittedAt.slice(0, 10), title: `${who} sent a ${r.kind === 'other' ? 'report' : r.kind + ' report'}`, body })
+        const mgr = db.employees.find((e) => e.id === r.employeeId)?.managerId
+        if (mgr) add({ id: `report:team:${r.id}:${r.version}`, kind: 'people', tone: 'info', rank: 52, page: 'my-work', to: 'my-work', date: r.submittedAt.slice(0, 10), forEmployee: mgr, title: `${who} sent you a report`, body })
+      }
+      const last = r.replies[r.replies.length - 1]
+      if (last && last.byEmployee !== r.employeeId && daysBetween(last.at.slice(0, 10), today) <= 14) {
+        const verb = last.status === 'approved' ? 'was approved' : last.status === 'changes' ? 'needs changes' : last.status === 'reviewed' ? 'was seen by your manager' : `has a reply from ${last.by}`
+        add({ id: `report:answer:${r.id}:${last.id}`, kind: 'people', tone: last.status === 'changes' ? 'warn' : last.status === 'approved' ? 'good' : 'info', rank: 56, page: 'my-work', to: 'my-work', date: last.at.slice(0, 10), forEmployee: r.employeeId, title: `Your report ${verb}`, body: `${r.title}${last.text ? ` · “${last.text.slice(0, 80)}”` : ''}` })
+      }
+    }
     // leave: requests waiting for the admin, and answers for the person who asked
     const name = (id: string) => db.employees.find((e) => e.id === id)?.name || 'Someone'
     const span = (r: { from: string; to: string; half?: boolean }) => (r.half ? `half day on ${fdate(r.from)}` : r.from === r.to ? fdate(r.from) : `${fdate(r.from)} to ${fdate(r.to)}`)

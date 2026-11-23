@@ -1,4 +1,6 @@
 import { applyBusinessTypes, TRANSPORT_HEAD, WAREHOUSE_PLACE } from './catalog'
+import { addStepNotes } from './seedNotes'
+import { defaultTrade } from './tradeCatalog'
 import { actions } from './actions'
 import { depreciationDue } from './calc/assets'
 import { accountBalances, accountOf, cashEntries, cashForDay } from './calc/cashbook'
@@ -11,6 +13,7 @@ import { addDays, addMonths, daysBetween, fmonth, parse, todayISO } from './form
 import { defaultRoles } from './permissions'
 import type {
   PartyDetails,
+  TradeInfo,
   Collection, Dealer, DealerTerms, Expense, MessageKind, TransportCostKind, TransportLink, Trip, TripStatus, Vehicle, Db, Employee, FactoryBill, FactoryOrder, FactoryOrderType, FactoryPayment, FactoryReceipt, Invoice, InvoiceLine, ISODate,
   MaterialGiven, Product, ProductKind, Purchase, ShipmentCost, SupplierPayment, SupplierTerms,
 } from './types'
@@ -140,6 +143,14 @@ export function demoDb(): Db {
     PB('PB-218', 's2', 15, 'crude', 1500, 122, 'credit'),
     PB('PB-221', 's1', 9, 'powder', 500, 300, 'credit'),
   ]
+  // each bill was counted in by the warehouse
+  const checkIn: Record<string, string> = { 'PB-203': '24 drums, seals intact', 'PB-209': 'Cartons counted, 6 jars cracked — supplier replaced them', 'PB-218': 'Tanker weighed at the gate', 'PB-221': '20 drums' }
+  for (const p of db.purchases) p.recv = { date: p.date, by: 'Demo Warehouse', note: checkIn[p.id] }
+  // entered by the office, waiting for the warehouse to count them in
+  db.purchases.push(
+    { ...PB('PB-222', 's2', 1, 'crude', 800, 124, 'credit'), pending: true, expected: d(-1), siteId: 'wh2', by: 'Demo Accountant' },
+    { ...PB('PB-223', 's3', 0, 'ejar', 300, 45, 'credit'), pending: true, expected: d(0), by: 'Demo Accountant' },
+  )
   const SP = (supplierId: string, purchaseId: string, ago: number, amount: number, method: string, note: string): SupplierPayment =>
     ({ id: 'sp' + t(), ts, supplierId, purchaseId, date: d(ago), amount, method, note })
   db.supplierPayments = [
@@ -177,6 +188,83 @@ export function demoDb(): Db {
       steps: { lc: { date: d(62) }, shipped: { date: d(52) }, port: { date: d(40) }, customs: { date: d(37) }, warehouse: { expected: d(-1) } },
     },
   ]
+
+  // import and export terms, transport and LC details for the demo shipments
+  const TR = (dir: 'import' | 'export', x: Partial<TradeInfo>): TradeInfo => ({ ...defaultTrade(dir), ...x })
+  const ev = (ago: number, place: string, text: string) => ({ id: 'te' + t(), date: d(ago), place, text })
+  const ship = (id: string) => db.imports.find((x) => x.id === id)!
+  ship('EXP-001').trade = TR('export', {
+    mode: 'road', incoterm: 'FCA', payment: 'contract', loadPort: 'Banglabandha land port', dischargePort: 'Kakarbhitta', etd: d(-9), eta: d(-11),
+    carrier: 'Nepal Bangla Transport', vessel: 'Dhaka Metro-TA 11-4402', docNo: '', forwarder: 'Himalaya Logistics', cnfAgent: 'Panchagarh C&F House',
+    piNo: 'PI-NP-014', invoiceNo: 'CI-2026-031', expNo: 'EXP-0193-2026', incentivePct: 4, sourceTaxPct: 1, packages: 200, grossKg: 230,
+  })
+  ship('IMP-015').trade = TR('import', {
+    mode: 'sea', incoterm: 'CFR', payment: 'lc-sight', loadPort: 'Ningbo', dischargePort: 'Chattogram port', etd: d(-8), eta: d(-30),
+    carrier: 'COSCO Shipping', containers: [{ no: '', size: '20', seal: '' }], forwarder: 'Ocean Link Logistics', cnfAgent: 'Rahman C&F Agency',
+    piNo: 'HX-PI-2026-118', invoiceNo: '', packages: 400, grossKg: 1800, cbm: 22,
+    lc: { amount: 6500, marginPct: 20, issuedOn: d(4), lastShipment: d(-10), expiry: d(-12), issuingBank: 'Islami Bank, Agrabad branch', advisingBank: 'Bank of China, Ningbo' },
+    events: [ev(4, 'Dhaka', 'LC opened and sent by SWIFT'), ev(1, 'Ningbo', 'Supplier confirmed goods ready for stuffing')],
+  })
+  ship('IMP-014').trade = TR('import', {
+    mode: 'sea', incoterm: 'FOB', payment: 'lc-usance', usanceDays: 90, loadPort: 'Port Klang', dischargePort: 'Chattogram port', etd: d(24), eta: d(6),
+    carrier: 'Maersk Line', vessel: 'Maersk Kalmar', voyage: '247W', docNo: 'MAEU 238814502',
+    containers: [{ no: 'MSKU 482915-3', size: '20', seal: 'ML-77120' }, { no: 'MSKU 482916-0', size: '20', seal: 'ML-77121' }],
+    freight: 900, forwarder: 'Seacon Freight', cnfAgent: 'Rahman C&F Agency', piNo: 'FELDA-PI-889', invoiceNo: 'FVO-INV-55102', grossKg: 18200, cbm: 40, packages: 2,
+    lc: { amount: 18000, marginPct: 10, issuedOn: d(33), lastShipment: d(20), expiry: d(-25), issuingBank: 'Dutch-Bangla Bank, Khatunganj', advisingBank: 'Maybank, Kuala Lumpur' },
+    events: [ev(33, 'Dhaka', 'Usance LC opened, 90 days from B/L'), ev(24, 'Port Klang', 'Loaded on Maersk Kalmar 247W, B/L issued'), ev(15, 'Colombo', 'Transhipped to feeder vessel'), ev(6, 'Chattogram outer anchorage', 'Arrived, waiting for berth'), ev(5, 'Chattogram port', 'Berthed, containers landed at CCT')],
+  })
+  ship('IMP-013').trade = TR('import', {
+    mode: 'sea', incoterm: 'CFR', payment: 'cad', loadPort: 'Kolkata', dischargePort: 'Chattogram port', etd: d(52), eta: d(41),
+    carrier: 'Sinokor', vessel: 'Sinokor Bangkok', voyage: '031E', docNo: 'SNKO 0198273', containers: [{ no: 'SNKU 120433-8', size: '20', seal: 'SK-4410' }],
+    cnfAgent: 'Rahman C&F Agency', piNo: 'KAC-PI-77', invoiceNo: 'KAC-INV-2026-140', grossKg: 5100, packages: 200,
+    events: [ev(52, 'Kolkata', 'Sailed'), ev(40, 'Chattogram port', 'Arrived and berthed'), ev(37, 'Chattogram port', 'Released by customs')],
+  })
+  ship('IMP-014').costs = ship('IMP-014').costs.map((c) => (c.type === 'Port charge' ? { ...c, type: 'Port charges (CPA)' } : c))
+  ship('IMP-013').costs = ship('IMP-013').costs.map((c) => (c.type === 'Port charge' ? { ...c, type: 'Port charges (CPA)' } : c))
+  ship('IMP-013').customs = { hsCode: '3808.91.00', port: 'Chattogram port', boeNo: 'C-171044', boeDate: d(39), stages: { docs: d(40), boe: d(39), assess: d(38), duty: d(38), exam: d(38), release: d(37) }, docs: {}, rates: { cd: 10, rd: 3, sd: 0, vat: 15, ait: 5, at: 5 } }
+  db.imports.push(
+    {
+      id: 'IMP-012', direction: 'import', ts: t(), supplier: 'Shenzhen Bright Lighting Co.', country: 'China', productId: '', productName: 'LED bulbs 12W', qty: 6000, unit: 'pcs', lcNo: '', bank: 'BRAC Bank', usd: 2400, rate: 121,
+      customs: { hsCode: '8539.52.00', port: 'Hazrat Shahjalal Int’l Airport (Dhaka) cargo', cnf: 'Skyline C&F', boeNo: 'C-208811', boeDate: d(70), stages: { docs: d(72), boe: d(70), assess: d(69), exam: d(69), release: d(68) }, docs: {}, rates: { cd: 25, rd: 3, sd: 20, vat: 15, ait: 5, at: 5 } },
+      costs: [{ ...cost(75, 'SWIFT and bank charges', 2200), group: 'bank' }, { ...cost(69, 'Airport cargo handling (CAAB)', 9400), group: 'port' }, { ...cost(68, 'C&F agent', 8000), group: 'clearance' }, { ...cost(68, 'Transport to warehouse', 3500), group: 'inland' }],
+      steps: { lc: { date: d(78) }, shipped: { date: d(74) }, port: { date: d(72) }, customs: { date: d(68) }, warehouse: { date: d(67) } },
+      trade: TR('import', {
+        mode: 'air', incoterm: 'CPT', payment: 'tt-advance', loadPort: 'Guangzhou Baiyun Airport', dischargePort: 'Hazrat Shahjalal Int’l Airport (Dhaka) cargo', etd: d(74), eta: d(72),
+        carrier: 'China Southern Cargo', vessel: 'CZ 3065', docNo: '784-22918470', cnfAgent: 'Skyline C&F', grossKg: 410, packages: 30, piNo: 'SBL-PI-2026-09', invoiceNo: 'SBL-CI-0912',
+        events: [ev(78, 'Dhaka', 'TT sent in advance'), ev(74, 'Guangzhou', 'Flown on CZ 3065'), ev(72, 'Dhaka airport', 'Landed, cargo at the airport shed'), ev(68, 'Dhaka airport', 'Released by customs')],
+      }),
+    },
+    {
+      id: 'IMP-011', direction: 'import', ts: t(), supplier: 'Bharat Agro Plastics', country: 'India', productId: '', productName: 'Coil stands (metal)', qty: 40000, unit: 'pcs', lcNo: 'LC-2026-0388', bank: 'Sonali Bank', usd: 3100, rate: 121,
+      customs: { hsCode: '7326.20.00', port: 'Benapole land port', cnf: 'Benapole C&F Corp', boeNo: 'B-55120', boeDate: d(96), stages: { docs: d(97), boe: d(96), assess: d(95), exam: d(95), release: d(94) }, docs: {}, rates: { cd: 25, rd: 3, sd: 0, vat: 15, ait: 5, at: 5 } },
+      costs: [{ ...cost(110, 'LC opening commission', 1900), group: 'bank' }, { ...cost(97, 'Road freight', 14000), group: 'freight' }, { ...cost(95, 'Land port charges', 6200), group: 'port' }, { ...cost(94, 'C&F agent', 7000), group: 'clearance' }, { ...cost(93, 'Transport to warehouse', 9000), group: 'inland' }],
+      steps: { lc: { date: d(110) }, shipped: { date: d(99) }, port: { date: d(97) }, customs: { date: d(94) }, warehouse: { date: d(92) } },
+      trade: TR('import', {
+        mode: 'road', incoterm: 'FCA', payment: 'lc-sight', loadPort: 'Petrapole land port', dischargePort: 'Benapole land port', etd: d(99), eta: d(97),
+        carrier: 'Sarkar Roadlines', vessel: 'WB 23 C 4471', docNo: 'TR-77120', cnfAgent: 'Benapole C&F Corp', grossKg: 7600, packages: 160,
+        lc: { amount: 3100, marginPct: 15, issuedOn: d(110), lastShipment: d(95), expiry: d(85), issuingBank: 'Sonali Bank, Motijheel', advisingBank: 'State Bank of India, Kolkata', retiredOn: d(90) },
+        events: [ev(99, 'Petrapole', 'Truck crossed into Bangladesh'), ev(97, 'Benapole', 'At land port yard'), ev(94, 'Benapole', 'Released by customs')],
+      }),
+    },
+    {
+      id: 'EXP-002', direction: 'export', ts: t(), supplier: 'EuroHome GmbH', country: 'Germany', productId: 'coil', productName: 'Mosquito coil (10-pc box)', qty: 120, unit: 'cartons', lcNo: 'EXLC-DE-2026-07', bank: 'Eastern Bank', usd: 4200, rate: 120,
+      costs: [{ ...cost(46, 'Freight forwarder', 9000), group: 'clearance' }, { ...cost(46, 'Transport to port', 12000), group: 'inland' }, { ...cost(45, 'Certificate of origin / EPB', 1500), group: 'clearance' }, { ...cost(44, 'C&F agent', 6000), group: 'clearance' }],
+      steps: { contract: { date: d(60) }, ready: { date: d(48) }, customs: { date: d(44) }, shipped: { date: d(42) }, paid: {} },
+      customs: { hsCode: '3808.91.00', port: 'Chattogram port', boeNo: 'E-90231', boeDate: d(45), stages: { docs: d(47), boe: d(45), assess: d(45), exam: d(44), release: d(44) }, docs: {}, rates: {} },
+      unitCost: 1800,
+      trade: TR('export', {
+        mode: 'sea', incoterm: 'FOB', payment: 'lc-sight', currency: 'EUR', loadPort: 'Chattogram port', dischargePort: 'Hamburg', etd: d(42), eta: d(8),
+        carrier: 'Hapag-Lloyd', vessel: 'Hanover Express', voyage: '112W', docNo: 'HLCU CGP2611720', containers: [{ no: 'HLXU 873210-5', size: '20', seal: 'HL-50918' }],
+        forwarder: 'Seacon Freight', cnfAgent: 'Rahman C&F Agency', piNo: 'SB-PI-EU-07', invoiceNo: 'SB-EXP-2026-007', expNo: 'EXP-0188-2026', grossKg: 1450, cbm: 18, packages: 120,
+        lc: { amount: 4200, issuedOn: d(62), lastShipment: d(40), expiry: d(25), issuingBank: 'Commerzbank, Hamburg', advisingBank: 'Eastern Bank, Gulshan' },
+        incentivePct: 10, sourceTaxPct: 1, realisedFc: 2500, realisedRate: 121.5, realisedOn: d(12),
+        events: [ev(60, 'Dhaka', 'Export LC received from Commerzbank'), ev(44, 'Chattogram port', 'Export customs cleared'), ev(42, 'Chattogram port', 'Sailed on Hanover Express via Colombo'), ev(12, 'Dhaka', 'EUR 2,500 received; rest due on document acceptance')],
+      }),
+    },
+  )
+  // the air shipment's duty, as customs assessed it: CD, RD and SD stay in cost; VAT, AT and AIT are claimed back
+  actions.postDuties(db, { importId: 'IMP-012', date: d(69), method: 'Bank transfer' })
+  actions.postDuties(db, { importId: 'IMP-011', date: d(95), method: 'Bank transfer' })
 
   const E = (id: string, name: string, role: string, payType: Employee['payType'], salary: number, rate: number, ago: number): Employee =>
     ({ id, name, phone: '', role, payType, salary, rate, commissionOn: 'sales', joined: d(ago) })
@@ -273,6 +361,22 @@ export function demoDb(): Db {
     // today they are still at work: checked in, not out yet
     if (a.date === T) { delete a.outAt; delete a.hours }
   }
+  // who reports to whom, and a few written reports in different states
+  for (const [id, mgr] of [['e5', 'e4'], ['w1', 'e2'], ['w2', 'e2'], ['w3', 'e2'], ['e3', 'e2'], ['e2', 'e1']]) db.employees.find((e) => e.id === id)!.managerId = mgr
+  const at = (ago: number, hm: string) => `${d(ago)}T${hm}:00.000Z`
+  db.workReports = [
+    { id: 'WR-001', employeeId: 'e4', kind: 'weekly', from: d(13), to: d(7), title: 'Dhaka North: sales and collections, last week', status: 'approved', submittedAt: at(7, '11:20'), version: 1, attachments: [],
+      body: 'Visited 14 dealers in Uttara, Mirpur and Tongi.\nSales: Tk 3,10,400 against a weekly target of Tk 2,80,000.\nCollected Tk 2,65,000; Notun Bazar still owes Tk 1,41,927 — promised half by Thursday.\nTwo new dealers interested in the 5 L jar (Mirpur 11 and Abdullahpur).\nNext week: follow up Notun Bazar, take samples to the two new shops.',
+      replies: [{ id: 'rr1', at: at(6, '09:05'), by: 'Demo Owner', text: 'Good week. Push Notun Bazar for the full amount before giving new stock.', status: 'approved' }], reviewedBy: 'Demo Owner', reviewedAt: at(6, '09:05') },
+    { id: 'WR-002', employeeId: 'e5', kind: 'weekly', from: d(6), to: d(0), title: 'Handover notes before moving to Dhaka South', status: 'submitted', submittedAt: at(0, '08:40'), version: 1, attachments: [],
+      body: 'Dealers handed over to Jamal: Al-Amin Distribution (owes Tk 50,000, due next week) and Notun Bazar (see Jamal’s note).\nSales this week: Tk 1,84,000. Collected Tk 1,20,000.\nOpen issue: Al-Amin asked for 30 days credit instead of 15 — needs a decision.', replies: [] },
+    { id: 'WR-003', employeeId: 'w1', kind: 'incident', from: d(3), to: d(3), title: '12 cartons damaged at unloading', status: 'changes', submittedAt: at(3, '15:10'), version: 1, attachments: [],
+      body: 'While unloading the Shapla truck, a stack fell and 12 cartons of mosquito coil were crushed.',
+      replies: [{ id: 'rr2', at: at(2, '10:30'), by: 'Kamal Hossain', byEmployee: 'e2', text: 'Please add the challan number, who was unloading with you, and a photo of the cartons.', status: 'changes' }], reviewedBy: 'Kamal Hossain', reviewedAt: at(2, '10:30') },
+    { id: 'WR-004', employeeId: 'e2', kind: 'daily', from: d(1), to: d(1), title: 'Stock count and receiving', status: 'reviewed', submittedAt: at(1, '18:05'), version: 1, attachments: [],
+      body: 'Received FO-1041 part delivery (120 jars). Counted coil cartons: system 15, shelf 15. Crude oil tank reading matches the books.',
+      replies: [{ id: 'rr3', at: at(0, '09:00'), by: 'Shirin Sultana', byEmployee: 'e1', text: 'Seen, thanks.', status: 'reviewed' }], reviewedBy: 'Shirin Sultana', reviewedAt: at(0, '09:00') },
+  ]
   // the electrician got an advance on the contract
   db.payroll.push({ id: 'pr-w4', ts: t(), date: d(12), month: d(12).slice(0, 7), method: 'Cash', lines: [{ employeeId: 'w4', kind: 'contract', amount: 20000 }] })
 
@@ -309,8 +413,9 @@ export function demoDb(): Db {
   }
   for (const x of [...db.suppliers, ...db.factories]) if (places[x.id] && !x.address) Object.assign(x, places[x.id])
   db.warehouses = [
-    { id: 'wh1', name: 'Main godown', address: 'Holding 41, Bscic Road', area: 'Tongi', city: 'Gazipur', manager: 'Abdul Karim', phone: '01714-220981', capacity: '9,000 cartons', note: 'Trucks unload 8am–8pm', main: true },
-    { id: 'wh2', name: 'Chattogram depot', address: 'Shed 5, Sagorika Road', area: 'Pahartali', city: 'Chattogram', manager: 'Nurul Amin', phone: '01818-330417', capacity: '3,500 cartons', note: 'Imports from the port come here first' },
+    { id: 'wh1', code: 'TNG-01', name: 'Main godown', address: 'Holding 41, Bscic Road', area: 'Tongi', city: 'Gazipur', manager: 'Abdul Karim', phone: '01714-220981', capacity: '9,000 cartons', note: 'Trucks unload 8am–8pm', main: true },
+    { id: 'wh2', code: 'CTG-01', name: 'Chattogram depot', address: 'Shed 5, Sagorika Road', area: 'Pahartali', city: 'Chattogram', manager: 'Nurul Amin', phone: '01818-330417', capacity: '3,500 cartons', note: 'Imports from the port come here first' },
+    { id: 'wh3', code: 'NGJ-01', name: 'Kanchpur store', address: 'Holding 12, Dhaka–Chattogram Highway', area: 'Kanchpur', city: 'Narayanganj', manager: 'Selim Reza', phone: '01716-552190', capacity: '1,200 cartons', note: 'Next to Shapla Chemicals; their goods are received here' },
   ]
   const staffPhones: Record<string, string> = { e1: '01711-120034', e2: '01811-450672', e4: '01712-660981', e5: '01913-284415' }
   for (const e of db.employees) if (staffPhones[e.id] && !e.phone) e.phone = staffPhones[e.id]
@@ -367,7 +472,7 @@ export function demoDb(): Db {
   db.parcels = sampleParcels(db, T).map((x, k) => ({ ...x, id: 'pc' + (k + 1), ts: t() }))
   addDeliveryAndMessages(db, T, t)
   for (const [id, target] of [['e4', 1500000], ['e5', 1200000]] as const) (db.employees.find((e) => e.id === id) as Employee).salesTarget = target
-  db.seq = { id: 1000, ts, fo: 1043, inv: 2312, imp: 16, exp: 2, pb: 222, est: 104, qt: 104 }
+  db.seq = { id: 1000, ts, fo: 1043, inv: 2312, imp: 16, exp: 3, pb: 224, est: 104, qt: 104 }
   ts = addTransportHistory(db, T, ts)
   addAssetsAndInvestors(db, T)
   addAccountsAndExpenses(db, T)
@@ -387,10 +492,17 @@ export function demoDb(): Db {
   // the Chattogram supplier delivers to the Chattogram depot, and part of it was trucked to the main godown
   const ctg = db.purchases.filter((x) => x.supplierId === 's2').sort((a, b) => (a.date < b.date ? -1 : 1))
   for (const x of ctg) x.siteId = 'wh2'
-  const lastCtg = ctg[ctg.length - 1]
+  const lastCtg = ctg.filter((x) => !x.pending).pop()
   if (lastCtg && lastCtg.date < T) {
     db.stockTransfers = [{ id: 'TR-001', ts: t(), date: lastCtg.date < d(2) ? addDays(lastCtg.date, 1) : T, from: 'wh2', to: 'wh1', lines: [{ productId: lastCtg.productId, qty: Math.round(lastCtg.qty * 0.4) }], note: 'Covered van, Babul', by: 'Demo Owner' }]
   }
+  // the Kanchpur factory delivers next door, to the Kanchpur store
+  for (const o of db.factoryOrders.filter((x) => x.factoryId === 'f1')) for (const r of o.receipts) r.siteId = 'wh3'
+  const ngj = db.factoryOrders.filter((x) => x.factoryId === 'f1').flatMap((o) => o.receipts.map((r) => ({ o, r }))).sort((a, b) => (a.r.date < b.r.date ? 1 : -1))[0]
+  if (ngj && ngj.r.date < T) {
+    (db.stockTransfers ??= []).push({ id: 'TR-002', ts: t(), date: addDays(ngj.r.date, 1) > T ? T : addDays(ngj.r.date, 1), from: 'wh3', to: 'wh1', lines: [{ productId: ngj.o.productId, qty: Math.round(ngj.r.qty * 0.5) }], note: 'Pickup Dhaka Metro-NA 14-2290, Babul', by: 'Kamal Hossain' })
+  }
+  addStepNotes(db, 'Demo Owner', 'Kamal Hossain')
   for (const p of db.products) {
     if (p.sources?.includes('factory')) p.factoryIds = [...new Set(db.factoryOrders.filter((o) => o.productId === p.id).map((o) => o.factoryId))]
   }

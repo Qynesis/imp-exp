@@ -5,6 +5,8 @@ import { useBooks } from '@/core/store/context'
 import { LabelsSheet } from '@/features/products/sheets/LabelsSheet'
 import { SitePicker } from '@/components/SitePicker'
 import { Field, FormSheet, Segmented, useForm, useSheets, useToast } from '@/ui'
+import { useReceiveAccess } from '@/features/warehouse/receiveAccess'
+import { NotAllowed } from '@/features/warehouse/sheets/ReceiveSheets'
 
 type FreightMode = 'none' | 'in' | 'out'
 
@@ -14,12 +16,14 @@ type FreightMode = 'none' | 'in' | 'out'
  * added to the product cost (included) or kept as a transport expense only (excluded).
  */
 export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
-  const { db, act } = useBooks()
+  const { db, act, saveNow } = useBooks()
+  const { can, me } = useReceiveAccess()
   const sheets = useSheets()
   const toast = useToast()
   const [v, set, bind, nbind] = useForm({ siteId: siteStock(db).mainId, date: todayISO(), challan: '', qty: '', damaged: '', note: '', freightMode: 'none' as FreightMode, freight: '', method: 'Cash', labels: '' })
   const o = byId(db.factoryOrders, orderId)
   if (!o) return null
+  if (!can) return <NotAllowed title={`Receive shipment · ${o.id}`} crumb="Factory order" />
   const c = foCalc(db, o)
   const qty = num(v.qty)
   const freight = v.freightMode === 'none' ? 0 : num(v.freight)
@@ -30,13 +34,20 @@ export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
   const unitIn = qty > 0 && v.freightMode === 'in' ? o.rate + freight / qty : 0
   const newCost = prod && unitIn ? (Math.max(prod.stock, 0) * prod.cost + qty * unitIn) / (Math.max(prod.stock, 0) + qty) : 0
   return (
-    <FormSheet title={`Receive shipment · ${o.id}`} crumb="Factory order" submit="Receive goods" wide
+    <FormSheet title={`Confirm: goods received · ${o.id}`} crumb="Factory order" submit="Confirm received" busyLabel="Saving to the books…" wide
       note={`Still due from ${c.factory?.name}: ${fmt(c.pending)} of ${fmt(o.qty)} ${c.unit}. Whatever is not received now stays pending on this order. Payment is recorded separately, whenever you pay.`}
-      onSubmit={() => {
+      onSubmit={async () => {
+        if (!v.date) return 'Pick the date the goods came in.'
+        if (v.date > todayISO()) return 'The date cannot be in the future.'
+        if (v.date < o.placed) return 'The goods cannot come in before the order was placed.'
         if (qty <= 0) return 'Enter the quantity received.'
+        if (num(v.damaged) < 0) return 'Damaged cannot be negative.'
         if (qty > c.pending) return `Only ${fmt(c.pending)} ${c.unit} are still pending on this order. Change the order first if the factory sent more.`
         if (v.freightMode !== 'none' && freight <= 0) return 'Enter the freight paid, or choose No freight.'
-        act('receiveShipment', { orderId, date: v.date, challan: v.challan.trim(), qty, damaged: num(v.damaged), note: v.note.trim(), freight, freightInCost: v.freightMode === 'in', method: v.method, siteId: v.siteId || undefined })
+        const why = act('receiveShipment', { orderId, date: v.date, challan: v.challan.trim(), qty, damaged: num(v.damaged), note: v.note.trim(), freight, freightInCost: v.freightMode === 'in', method: v.method, siteId: v.siteId || undefined, by: me })
+        if (why) return why
+        const saved = await saveNow()
+        if (saved) return saved
         if (v.labels === 'yes') {
           const p = db.products.find((x) => x.id === o.productId)
           const cartons = p?.perCarton ? Math.ceil(qty / p.perCarton) : 0
@@ -52,7 +63,7 @@ export function ReceiveShipmentSheet({ orderId }: { orderId: string }) {
           set('qty', String(next))
         }} />
       </div>
-      <Field label="Date received"><input type="date" {...bind('date')} /></Field>
+      <Field label="Date received"><input type="date" min={o.placed} max={todayISO()} {...bind('date')} /></Field>
       <SitePicker db={db} bind={bind('siteId')} />
       <Field label="Challan number"><input {...bind('challan')} placeholder="e.g. CH-320" /></Field>
       <Field label={`Good quantity received (${c.unit})`}><input {...nbind('qty')} placeholder={`Up to ${fmt(c.pending)}`} /></Field>

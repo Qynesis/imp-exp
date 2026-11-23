@@ -60,7 +60,7 @@
 .grid-cat { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 20px; align-items: start; }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.page-loading { min-height: 60vh; }
+
 
 .lang-row { padding: 10px 10px 0; }
 .sheet .lang-row { padding: 14px 0 4px; }

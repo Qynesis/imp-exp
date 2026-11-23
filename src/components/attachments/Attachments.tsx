@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AttachTarget, Attachment } from '@shared/domain'
 import { accessGuard, useBooks } from '@/core/store/context'
 import { Button, cls, Icon, Sheet, useSheets, useToast, type SheetComponent } from '@/ui'
-import { fileSize, uploadFile } from './upload'
+import { ACCEPT_FILES, fileSize, uploadFile } from './upload'
 
 /** Pick files (camera on phones) and upload them; calls `onAdded` with each one. */
 function PickButton({ onAdded, label = 'Attach receipt', small }: { onAdded: (a: Attachment) => void; label?: string; small?: boolean }) {
@@ -25,7 +25,7 @@ function PickButton({ onAdded, label = 'Attach receipt', small }: { onAdded: (a:
   return (
     <>
       <Button type="button" size={small ? 'sm' : undefined} variant="secondary" icon="clip" disabled={busy} onClick={() => input.current?.click()}>{busy ? 'Uploading…' : label}</Button>
-      <input ref={input} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => void pick(e.target.files)} />
+      <input ref={input} type="file" accept={ACCEPT_FILES} multiple hidden onChange={(e) => void pick(e.target.files)} />
     </>
   )
 }
@@ -39,7 +39,7 @@ function FileChips({ files, onRemove }: { files: Attachment[]; onRemove?: (f: At
       {files.map((f) => (
         <span key={f.id} className="file-chip">
           <button type="button" onClick={() => sheets.open(DocumentSheet, { file: f })} title={`View ${f.name}`}>
-            <Icon name={f.type === 'application/pdf' ? 'receipt' : 'clip'} size={14} />
+            <Icon name={f.type === 'application/pdf' ? 'receipt' : f.type.startsWith('image/') ? 'clip' : 'folder'} size={14} />
             <span>{f.name}</span>
             <small>{fileSize(f.size)}</small>
           </button>
@@ -51,15 +51,20 @@ function FileChips({ files, onRemove }: { files: Attachment[]; onRemove?: (f: At
 }
 
 /** In a form, before the payment is saved: files are uploaded now and linked when the form is saved. */
-export function AttachField({ value, onChange }: { value: Attachment[]; onChange: (v: Attachment[]) => void }) {
+export function AttachField({ value, onChange, label = 'Money receipt or document', hint = 'optional: photo or PDF', button }: { value: Attachment[]; onChange: (v: Attachment[]) => void; label?: string; hint?: string; button?: string }) {
   const { call } = useBooks()
   return (
     <div className="attach-field wide-note">
-      <span className="field-label">Money receipt or document <small className="t-muted">(optional: photo or PDF)</small></span>
+      <span className="field-label">{label} <small className="t-muted">({hint})</small></span>
       <FileChips files={value} onRemove={(f) => { onChange(value.filter((x) => x.id !== f.id)); void call('DELETE', 'files?id=' + f.id).catch(() => undefined) }} />
-      <PickButton small onAdded={(a) => onChange([...value, a])} />
+      <PickButton small label={button} onAdded={(a) => onChange([...value, a])} />
     </div>
   )
+}
+
+/** Files to look at (no changes): tap one to open it. */
+export function FileList({ files }: { files: Attachment[] }) {
+  return <FileChips files={files} />
 }
 
 /** For a payment already saved: list, add and remove its documents. */
@@ -126,8 +131,17 @@ export const DocumentSheet: SheetComponent<{ file: Attachment }> = ({ file }) =>
     <Sheet title={file.name} crumb="Document" wide footer={url ? <a className="btn btn-secondary" href={url} download={file.name}>Download</a> : undefined}>
       {err && <div className="err" role="alert">{err}</div>}
       {!url && !err && <p className="t-muted">Loading…</p>}
-      {url && (file.type === 'application/pdf' ? <iframe className="doc-frame" src={url} title={file.name} /> : <img className="doc-img" src={url} alt={file.name} />)}
+      {url && (file.type === 'application/pdf' ? <iframe className="doc-frame" src={url} title={file.name} />
+        : file.type.startsWith('image/') ? <img className="doc-img" src={url} alt={file.name} />
+        : file.type.startsWith('text/') ? <TextPreview url={url} />
+        : <p className="t-muted">{file.type.includes('sheet') || file.type.includes('excel') ? 'An Excel file' : 'A Word file'} ({fileSize(file.size)}). Download it to open it.</p>)}
     </Sheet>
   )
 }
 DocumentSheet.readOnlySafe = true
+
+function TextPreview({ url }: { url: string }) {
+  const [text, setText] = useState('')
+  useEffect(() => { void fetch(url).then((r) => r.text()).then((t) => setText(t.slice(0, 20000))) }, [url])
+  return <pre className="doc-text">{text}</pre>
+}

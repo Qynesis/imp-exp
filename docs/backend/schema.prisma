@@ -999,6 +999,10 @@ model Shipment {
 
   @@unique([tenantId, no])
   @@index([tenantId, direction])
+  /// Transport mode, Incoterm, payment terms, ports, carrier, B/L or AWB, containers, LC details,
+  /// export incentive and proceeds (TradeInfo in shared/domain/types.ts). Fields used in queries
+  /// (mode, incoterm, payment, lcExpiry, eta) are worth promoting to columns.
+  trade        Json?
 }
 
 /// lc, shipped, port, customs, warehouse (import) or contract, ready, customs, shipped, paid (export).
@@ -1021,6 +1025,11 @@ model ShipmentCost {
   type       String
   amount     Decimal  @db.Decimal(14, 2)
   method     String
+  /// freight | bank | port | clearance | duty | inland | other
+  group      String   @default("other")
+  /// VAT, AT and AIT claimed back: kept out of landed cost.
+  recoverable Boolean @default(false)
+  note       String?
   createdAt  DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([tenantId, date])
@@ -1486,6 +1495,8 @@ model Employee {
   workDays     WorkDay[]
   /// First workplace; later moves are StaffTransfer rows.
   placeId      String?       @db.Uuid
+  /// Line manager: their reports go to this employee too.
+  managerId    String?       @db.Uuid
   users        User[]
   dealers      Dealer[]
   quotes       SalesQuote[]
@@ -2098,4 +2109,57 @@ model StaffTransfer {
   @@unique([tenantId, number])
   @@index([tenantId, employeeId, date])
   @@index([tenantId, toId, date])
+}
+
+enum ReportKind {
+  daily
+  weekly
+  monthly
+  incident
+  other
+}
+
+enum ReportStatus {
+  submitted
+  reviewed
+  approved
+  changes
+  withdrawn
+}
+
+/// A written report from an employee to their manager and the office.
+model WorkReport {
+  id          String       @id @default(uuid()) @db.Uuid
+  tenantId    String       @db.Uuid
+  number      String
+  employeeId  String       @db.Uuid
+  kind        ReportKind
+  fromDate    DateTime     @db.Date
+  toDate      DateTime     @db.Date
+  title       String
+  body        String
+  /// [{ id, name, type, size }] of StoredFile rows.
+  attachments Json         @default("[]")
+  status      ReportStatus @default(submitted)
+  submittedAt DateTime     @db.Timestamptz(3)
+  version     Int          @default(1)
+  reviewedBy  String?
+  reviewedAt  DateTime?    @db.Timestamptz(3)
+  replies     ReportReply[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status])
+  @@index([tenantId, employeeId, submittedAt])
+}
+
+model ReportReply {
+  id          String        @id @default(uuid()) @db.Uuid
+  reportId    String        @db.Uuid
+  report      WorkReport    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  at          DateTime      @db.Timestamptz(3)
+  by          String
+  byEmployee  String?       @db.Uuid
+  text        String        @default("")
+  attachments Json?
+  status      ReportStatus?
 }

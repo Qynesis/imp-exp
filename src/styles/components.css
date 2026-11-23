@@ -334,3 +334,44 @@ select.in { appearance: none; padding-right: 34px; background: var(--surface) ur
   .pager-btns .icon-btn[aria-label="First page"], .pager-btns .icon-btn[aria-label="Last page"] { display: none !important; }
 }
 .pager-btns .icon-btn[aria-label="First page"], .pager-btns .icon-btn[aria-label="Last page"] { display: inline-flex; align-items: center; justify-content: center; }
+/* long values (names, addresses) wrap instead of running off the card; short figures stay on one line */
+.kv > :last-child { min-width: 0; }
+.kv > b:last-child { white-space: normal; overflow-wrap: anywhere; }
+.doc-text { white-space: pre-wrap; font: 13px/1.5 ui-monospace, monospace; background: var(--fill); padding: 14px; border-radius: 10px; max-height: 60vh; overflow: auto; }
+
+/* ---------- filter panel ---------- */
+.filter-panel { display: flex; flex-direction: column; gap: 10px; }
+.filter-more { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--fill); }
+.filter-more .field { min-width: 0; margin: 0; }
+.filter-more .in { width: 100%; min-width: 0; background: var(--surface); }
+.filter-field .in.is-set { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(15, 115, 99, 0.12); }
+.filter-dates { grid-column: span 2; }
+.filter-dates-row { display: flex; align-items: center; gap: 6px; }
+.filter-dates-row .in { flex: 1 1 0; }
+.filter-summary { font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.filter-summary b { color: var(--ink); }
+@media (max-width: 560px) { .filter-more { grid-template-columns: 1fr; } .filter-dates { grid-column: auto; } }
+
+/* loading: spinner on buttons and waits, page skeleton while a screen downloads */
+.spinner { display: inline-block; flex: none; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; opacity: 0.8; animation: spin 0.7s linear infinite; }
+.splash .spinner { color: var(--brand); }
+.btn.is-loading { cursor: progress; opacity: 0.85; }
+.btn.is-loading:disabled { opacity: 0.85; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.page-loading { min-height: 60vh; display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
+.skel { border-radius: 12px; background: linear-gradient(90deg, var(--line-soft) 0%, var(--fill) 40%, var(--line-soft) 80%); background-size: 200% 100%; animation: shimmer 1.3s ease-in-out infinite; }
+.skel-title { height: 30px; width: min(260px, 60%); }
+.skel-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.skel-stat { height: 92px; }
+.skel-card { height: 320px; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .spinner, .skel { animation-duration: 2.4s; } }
+
+/* a screen that failed: say so in place, keep the menu */
+.screen-error { padding: 24px; display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+.screen-error b { font-size: 17px; }
+.screen-error details { font-size: 13px; color: var(--muted); }
+.screen-error code { display: block; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+
+/* something waiting for someone, above a page's tabs */
+.attention-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: var(--warn-soft); }

@@ -3,6 +3,7 @@ import { PageHead } from '@/components/PageHead'
 import { useBooks } from '@/core/store/context'
 import { EmployeeProfileView } from '@/features/employees/EmployeeProfileView'
 import { CheckInCard } from './CheckInCard'
+import { MyReports } from '@/features/staff-reports/MyReports'
 import { LeaveRequestSheet } from '@/features/employees/sheets/LeaveSheets'
 import { Button, Card, Empty, useSheets } from '@/ui'
 
@@ -24,6 +25,7 @@ export default function MyWorkPage() {
       {post.next && <p className="move-note">{`You are transferred to ${byId(db.workplaces || [], post.next.to)?.name || 'a new place'} from ${fdate(post.next.date)}. See the Workplace tab for the address and who to report to.`}</p>}
       {waiting.length > 0 && <div className="next-step"><span>{waiting.length} leave request{waiting.length === 1 ? ' is' : 's are'} waiting for the office to answer.</span></div>}
       {e.status !== 'left' && <CheckInCard e={e} />}
+      <MyReports e={e} />
       <Card>
         <div className="card-body">
           <EmployeeProfileView employeeId={e.id} self />

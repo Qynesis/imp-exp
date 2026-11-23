@@ -42,9 +42,11 @@ export const cashEntries = (db: Db): CashEntry[] =>
     }
     for (const s of db.imports) {
       if (s.direction === 'export') {
-        if (s.steps.paid?.date) push(s.steps.paid.date, s.ts, `${s.id} · export proceeds, USD ${fmt(s.usd)}`, 'Export sales', s.usd * s.rate, 0, 'Bank transfer')
+        // what the bank actually paid, at its rate, when it is known
+        if (s.steps.paid?.date) push(s.steps.paid.date, s.ts, `${s.id} · export proceeds, ${s.trade?.currency || 'USD'} ${fmt(s.trade?.realisedFc || s.usd)}`, 'Export sales', s.trade?.realisedFc ? s.trade.realisedFc * (s.trade.realisedRate || s.rate) : s.usd * s.rate, 0, 'Bank transfer')
       } else if (s.steps.lc?.date) push(s.steps.lc.date, s.ts, `${s.id} · LC invoice value`, 'Import', 0, s.usd * s.rate, 'Bank transfer')
       for (const c of s.costs) push(c.date, c.ts, `${s.id} · ${c.type}`, s.direction === 'export' ? 'Export cost' : 'Import cost', 0, c.amount, c.method)
+      for (const c of s.costs) if (c.refundedOn) push(c.refundedOn, c.ts + 0.3, `${s.id} · ${c.type} refunded`, 'Import cost', c.amount, 0, c.method)
     }
     for (const p of db.payroll) {
       const sal = sum(p.lines.filter((l) => l.kind === 'salary'), (l) => l.amount)

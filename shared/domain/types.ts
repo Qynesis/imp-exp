@@ -15,6 +15,8 @@ export type PageId =
   | 'dashboard'
   | 'my-work'
   | 'attendance'
+  | 'trade'
+  | 'staff-reports'
   | 'factory-orders'
   | 'raw-materials'
   | 'sales-analytics'
@@ -189,6 +191,8 @@ export interface PartyDetails {
 /** A warehouse or godown where goods are received and kept. */
 export interface WarehouseSite {
   id: string
+  /** Short code the admin gives it, unique in the books: "TNG-01", "CTG". Printed on challans and labels. */
+  code?: string
   name: string
   address: string
   area: string
@@ -238,6 +242,8 @@ export interface FactoryReceipt extends Dated {
   freightInCost?: boolean
   /** Warehouse it went into; missing means the main one. */
   siteId?: string
+  /** Who confirmed the goods in at the warehouse. */
+  by?: string
 }
 /** A change to an order while the factory is still working on it. */
 export interface OrderAmendment extends Dated {
@@ -348,6 +354,14 @@ export interface Purchase extends Dated {
   tax?: number
   /** Warehouse it went into; missing means the main one. */
   siteId?: string
+  /** Waiting for the warehouse to count the goods in: not in stock yet. */
+  pending?: boolean
+  /** When the supplier said the goods will come (while pending). */
+  expected?: ISODate
+  /** Who confirmed the goods in, when, and anything short or damaged (not put into stock). */
+  recv?: { date: ISODate; by: string; short?: number; note?: string }
+  /** Who entered the bill. */
+  by?: string
 }
 export interface SupplierPayment extends Dated {
   id: string
@@ -367,6 +381,10 @@ export type StepKey = ImportStep | ExportStep
 export interface StepState {
   date?: ISODate
   expected?: ISODate
+  /** What was written when the step was confirmed: vessel, B/L, who signed, anything to remember. */
+  note?: string
+  /** Who confirmed it. */
+  by?: string
 }
 
 export interface ShipmentCost extends Dated {
@@ -374,9 +392,101 @@ export interface ShipmentCost extends Dated {
   type: string
   amount: number
   method: string
+  /** Freight, bank, port, clearance, duty, inland or other; missing means worked out from the type. */
+  group?: CostGroup
+  /** VAT, AT and AIT paid at import: claimed back, so not part of the goods' cost. */
+  recoverable?: boolean
+  note?: string
+  /** A refundable deposit (re-export) came back on this day. */
+  refundedOn?: ISODate
 }
 
-export type DutyKey = 'cd' | 'rd' | 'sd' | 'vat' | 'ait' | 'at'
+/* ---------- import and export terms ---------- */
+export type CostGroup = 'freight' | 'bank' | 'port' | 'clearance' | 'duty' | 'inland' | 'other'
+export type TransportMode = 'sea' | 'air' | 'road' | 'rail' | 'courier'
+export type Incoterm = 'EXW' | 'FCA' | 'FAS' | 'FOB' | 'CFR' | 'CIF' | 'CPT' | 'CIP' | 'DAP' | 'DPU' | 'DDP'
+/** How goods enter customs: for the local market, into a free zone, for re-export, or passing through. */
+export type CustomsProcedure = 'home' | 'freezone' | 'reexport' | 'transit'
+export type TradePayment = 'lc-sight' | 'lc-usance' | 'tt-advance' | 'tt-after' | 'cad' | 'da' | 'contract' | 'open'
+export interface Container {
+  no: string
+  size: '20' | '40' | '40HC' | 'LCL' | 'reefer'
+  seal: string
+}
+/** A line in the shipment's tracking timeline: where the goods were and when. */
+export interface TrackEvent {
+  id: string
+  date: ISODate
+  place: string
+  text: string
+}
+export interface LcInfo {
+  /** LC amount in the invoice currency; missing means the invoice value. */
+  amount?: number
+  /** Percent of the LC value the bank holds as margin. */
+  marginPct?: number
+  issuedOn?: ISODate
+  lastShipment?: ISODate
+  expiry?: ISODate
+  issuingBank: string
+  advisingBank: string
+  /** Bank paid the supplier and the LC is closed. */
+  retiredOn?: ISODate
+}
+/** How goods travel, on what terms and how they are paid. Missing in books made before this existed. */
+export interface TradeInfo {
+  mode: TransportMode
+  incoterm: Incoterm
+  payment: TradePayment
+  /** Days after sight for usance LC or DA. */
+  usanceDays?: number
+  /** Invoice currency, e.g. USD, EUR, CNY, INR. */
+  currency: string
+  /** Port, airport or land port of loading, and of arrival. */
+  loadPort: string
+  dischargePort: string
+  etd?: ISODate
+  eta?: ISODate
+  /** Shipping line, airline, transporter or courier. */
+  carrier: string
+  /** Vessel, flight or truck number. */
+  vessel: string
+  voyage: string
+  /** Bill of lading, air waybill, truck receipt or courier tracking number. */
+  docNo: string
+  containers: Container[]
+  /** Freight and insurance in the invoice currency, when the terms leave them to us. */
+  freight?: number
+  insurance?: number
+  forwarder: string
+  cnfAgent: string
+  grossKg?: number
+  cbm?: number
+  packages?: number
+  /** Proforma invoice, commercial invoice; EXP form number for exports. */
+  piNo: string
+  invoiceNo: string
+  expNo?: string
+  lc?: LcInfo
+  /** VAT, AT and AIT at import are claimed back (VAT-registered importer). */
+  claimTax: boolean
+  /** Customs procedure; missing means for the local market. */
+  procedure?: CustomsProcedure
+  /** Free zone the goods go into or leave from, e.g. JAFZA, DMCC, SAIF Zone. */
+  freeZone?: string
+  /** Exports: the import these goods came in on (re-export), for cost and margin. */
+  sourceImportId?: string
+  /** Exports: cash incentive percent, and proceeds realised in the invoice currency. */
+  incentivePct?: number
+  realisedFc?: number
+  realisedRate?: number
+  realisedOn?: ISODate
+  /** Exports: bank's source tax on proceeds, percent. */
+  sourceTaxPct?: number
+  events: TrackEvent[]
+}
+
+export type DutyKey = 'cd' | 'rd' | 'sd' | 'vat' | 'ait' | 'at' | 'excise'
 export type CustomsStage = 'docs' | 'boe' | 'assess' | 'duty' | 'exam' | 'release'
 export interface CustomsInfo {
   hsCode?: string
@@ -391,6 +501,8 @@ export interface CustomsInfo {
   freeUntil?: ISODate
   demurragePerDay?: number
   stages: Partial<Record<CustomsStage, ISODate>>
+  /** Notes written when a stage was confirmed, and who confirmed it. */
+  stageNotes?: Partial<Record<CustomsStage, { note?: string; by?: string }>>
   docs: Record<string, boolean>
 }
 
@@ -417,6 +529,7 @@ export interface Shipment {
   /** Warehouse imported goods went into; missing means the main one. */
   siteId?: string
   custom?: CustomValues
+  trade?: TradeInfo
 }
 
 /* ---------- selling ---------- */
@@ -739,6 +852,38 @@ export interface StaffTransfer {
   at: string
   cancelled?: boolean
 }
+/** A written report an employee sends to their manager and the office. */
+export type ReportKind = 'daily' | 'weekly' | 'monthly' | 'incident' | 'other'
+export type ReportStatus = 'submitted' | 'reviewed' | 'approved' | 'changes' | 'withdrawn'
+export interface ReportReply {
+  id: string
+  at: string
+  /** Name of the person who wrote it, and their employee id when they have one. */
+  by: string
+  byEmployee?: string
+  text: string
+  attachments?: Attachment[]
+  /** Set when the reply also changed the report's status (a review). */
+  status?: ReportStatus
+}
+export interface WorkReport {
+  id: string
+  employeeId: string
+  kind: ReportKind
+  /** The period it covers. */
+  from: ISODate
+  to: ISODate
+  title: string
+  body: string
+  attachments: Attachment[]
+  status: ReportStatus
+  submittedAt: string
+  /** Times it was edited and sent again after a request for changes. */
+  version: number
+  replies: ReportReply[]
+  reviewedBy?: string
+  reviewedAt?: string
+}
 /** Leave an employee asks for; the admin approves or declines it. */
 export type LeaveKind = 'casual' | 'sick' | 'annual' | 'unpaid' | 'other'
 export interface LeaveRequest {
@@ -822,6 +967,8 @@ export interface Employee {
   history?: JobEvent[]
   /** First workplace, before any transfer order. */
   placeId?: string
+  /** The person they report to; their reports go to this manager as well as the office. */
+  managerId?: string
 }
 export interface PayrollLine {
   employeeId: string
@@ -909,6 +1056,7 @@ export interface Db {
   /** Attendance register: one row per person per day marked. */
   attendance?: WorkDay[]
   leaveRequests?: LeaveRequest[]
+  workReports?: WorkReport[]
   workplaces?: WorkPlace[]
   staffTransfers?: StaffTransfer[]
   /** Paid leave days each person gets in a year, by kind; missing kinds have no limit. */

@@ -10,7 +10,7 @@ export function SitePicker({ db, bind, label = 'Into warehouse' }: { db: Db; bin
   return (
     <Field label={label} hint={cur ? fullAddress(cur) || undefined : undefined}>
       <select {...bind}>
-        {sites.map((w, i) => <option key={w.id} value={w.id}>{w.name}{i === 0 ? ' (main)' : ''}</option>)}
+        {sites.map((w, i) => <option key={w.id} value={w.id}>{w.code ? `${w.code} · ` : ''}{w.name}{i === 0 ? ' (main)' : ''}</option>)}
       </select>
     </Field>
   )

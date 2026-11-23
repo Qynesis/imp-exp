@@ -5,6 +5,7 @@ import { useStore } from '@/core/store/context'
 import { UIProvider } from '@/ui'
 import { ErrorBoundary } from './ErrorBoundary'
 import { Shell } from './Shell'
+import { Splash } from './Loading'
 
 // sign-in and the platform owner's page are only needed by some visitors, so they load on demand
 const AuthPage = lazy(() => import('@/features/auth/AuthPage'))
@@ -12,7 +13,6 @@ const AuthPage = lazy(() => import('@/features/auth/AuthPage'))
 const LandingPage = lazy(() => import('@/features/landing/LandingPage'))
 const PlatformPage = lazy(() => import('@/features/platform/PlatformPage'))
 
-const Splash = ({ text }: { text?: string }) => <div className="splash"><p>{text}</p></div>
 
 /** Signed out: the landing page, unless the visitor asked for sign-in or sign-up. */
 function SignedOut() {

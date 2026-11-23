@@ -10,6 +10,8 @@ import { BillingBar } from './BillingBar'
 import { BellButton, DesktopAlerts } from './Notifications'
 import { FEATURES, type FeatureRouteProps } from './features'
 import { Account, MoreMenuSheet, NavList } from './Navigation'
+import { ErrorBoundary } from './ErrorBoundary'
+import { PageLoading } from './Loading'
 import { useAccess } from './useAccess'
 
 /** One lazily loaded component per screen, made once. */
@@ -107,9 +109,11 @@ export function Shell() {
         <BillingBar />
         <div className={cls('page', nav.motion, readonly && 'readonly')} key={pageKey}>
           {readonly && feature.id !== 'my-work' && <div className="view-only" role="note">View only. Your role cannot make changes on this screen.</div>}
-          <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
-            <Screen params={params} />
-          </Suspense>
+          <ErrorBoundary screen>
+            <Suspense fallback={<PageLoading />}>
+              <Screen params={params} />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       </main>
 

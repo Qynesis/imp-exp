@@ -20,6 +20,8 @@ export interface StoreValue {
   clearNotice(): void
   /** Change the books. Applies on screen at once and is saved in the background. Returns why it was refused, or null. */
   act<K extends ActionName>(name: K, payload: ActionPayload<K>): string | null
+  /** Send changes made so far to the server now; resolves with why it was refused, or null once saved (or queued while offline). */
+  saveNow(): Promise<string | null>
   signIn(path: 'login', body: LoginRequest): Promise<void>
   signIn(path: 'signup', body: SignupRequest): Promise<void>
   signOut(): void
@@ -30,6 +32,8 @@ export interface StoreValue {
   platformSignOut(): void
   /** User management goes through the API because it owns the passwords. */
   users(method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query?: string): Promise<void>
+  /** Employees' reports: submit, withdraw, reply, review (any role; the server checks who may). */
+  workReport(body: Record<string, unknown>): Promise<void>
   /** The signed-in employee checks in or out (any role). */
   attend(body: { op: 'in'; lat?: number; lng?: number } | { op: 'out'; work: string; output?: number }): Promise<void>
   /** The signed-in employee asks for leave or withdraws a request (any role). */

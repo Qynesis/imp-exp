@@ -5,7 +5,8 @@ export const PAGES: readonly (readonly [PageId, string])[] = [
   ['dashboard', 'Dashboard'],
   ['factory-orders', 'Factory orders'],
   ['suppliers', 'Suppliers'],
-  ['imports', 'Shipments (import and export)'],
+  ['imports', 'Shipments (LC)'],
+  ['trade', 'Import and export'],
   ['customs', 'Customs clearance'],
   ['products', 'Products and stock'],
   ['raw-materials', 'Raw materials'],
@@ -20,6 +21,7 @@ export const PAGES: readonly (readonly [PageId, string])[] = [
   ['cashbook', 'Cashbook and dues'],
   ['employees', 'Employees'],
   ['attendance', 'Attendance (see and correct)'],
+  ['staff-reports', 'Employee reports (read and review)'],
   ['expenses', 'Expenses (one-time and regular)'],
   ['accounts', 'Accounts, tax and VAT'],
   ['fixed-assets', 'Fixed assets'],
@@ -66,6 +68,9 @@ export function roleLevel(role: Pick<Role, 'perms'>, page: PageId): AccessLevel 
 /** Screens added after roles were first saved take the access of the screen they grew out of until an admin sets them. */
 const INHERITS: Partial<Record<PageId, PageId[]>> = {
   attendance: ['employees'],
+  'staff-reports': ['employees'],
+  // the import and export section grew out of Shipments (LC): same access until an admin sets it
+  trade: ['imports'],
   'raw-materials': ['products'],
   // whoever keeps stock receives goods
   warehouse: ['products', 'raw-materials'],
@@ -103,3 +108,22 @@ export function canSee(db: Pick<Db, 'users' | 'roles'>, userId: string, key: See
 export const isAdmin = (db: Pick<Db, 'users' | 'roles'>, userId: string): boolean => levelFor(db, userId, 'settings') === 'edit'
 
 export const roleName = (db: Pick<Db, 'roles'>, roleId: string | undefined): string => db.roles.find((r) => r.id === roleId)?.name || 'No role'
+
+/** Who may confirm goods into the warehouse: an admin, or a role the admin gave edit access to Warehouse. */
+export const canReceive = (db: Pick<Db, 'users' | 'roles'>, userId: string): boolean => isAdmin(db, userId) || levelFor(db, userId, 'warehouse') === 'edit'
+
+/**
+ * Goods confirmed into stock between two copies of the books by someone who may not receive them, or null.
+ * The server refuses such a save, so a supplier's bill entered by the office waits for the warehouse.
+ */
+export function receiptRefusal(cur: Pick<Db, 'users' | 'roles' | 'purchases' | 'factoryOrders'>, next: Pick<Db, 'purchases' | 'factoryOrders'>, userId: string): string | null {
+  if (canReceive(cur, userId)) return null
+  const was = new Map(cur.purchases.map((p) => [p.id, p]))
+  for (const p of next.purchases) {
+    const before = was.get(p.id)
+    if (!p.pending && (!before || before.pending)) return `Only an admin or the warehouse can confirm goods received (bill ${p.billNo}).`
+  }
+  const seen = new Set(cur.factoryOrders.flatMap((o) => o.receipts.map((r) => r.id)))
+  for (const o of next.factoryOrders) for (const r of o.receipts) if (!seen.has(r.id)) return `Only an admin or the warehouse can receive factory goods (${o.id}).`
+  return null
+}

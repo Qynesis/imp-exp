@@ -24,6 +24,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState('')
   const ref = useRef({ token: getToken(), version: 0, db: null as Db | null, dirty: false, busy: false, timer: 0 as ReturnType<typeof setTimeout> | 0, locked: '' })
   const pushRef = useRef<() => void>(() => undefined)
+  // people waiting for the current change to reach the server (saveNow)
+  const waiters = useRef<((why: string | null) => void)[]>([])
+  const settle = useCallback((why: string | null) => {
+    const list = waiters.current
+    waiters.current = []
+    for (const w of list) w(why)
+  }, [])
 
   const enter = useCallback((r: BooksResponse) => {
     Object.assign(ref.current, { token: r.token ?? ref.current.token, version: r.version, db: r.db, dirty: false })
@@ -65,22 +72,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       r.version = res.version
       r.busy = false
       if (r.dirty) pushRef.current()
-      else setSync('saved')
+      else {
+        setSync('saved')
+        settle(null)
+      }
     } catch (e) {
       r.busy = false
       const status = e instanceof ApiError ? e.status : 500
-      if (status === 401) return leave()
+      if (status === 401) {
+        settle('You were signed out. Sign in again and redo the change.')
+        return leave()
+      }
       if (status === 0) {
         r.dirty = true
         setSync('offline')
         r.timer = setTimeout(() => pushRef.current(), RETRY_MS)
+        // kept on this device and sent when the connection is back
+        settle(null)
         return
       }
       // someone else saved first, or the change was not allowed: take the stored copy
-      setNotice(status === 409 ? 'Someone else just changed the books. Reloaded the latest, please redo your last change.' : (e as Error).message)
+      const why = status === 409 ? 'Someone else just changed the books. Reloaded the latest, please redo your last change.' : (e as Error).message || 'The server did not accept the change.'
+      setNotice(why)
+      settle(why)
       void pull(true)
     }
-  }, [leave, pull])
+  }, [leave, pull, settle])
+
+  const saveNow = useCallback(() => new Promise<string | null>((resolve) => {
+    const r = ref.current
+    if (!r.dirty && !r.busy) return resolve(null)
+    waiters.current.push(resolve)
+    clearTimeout(r.timer)
+    pushRef.current()
+  }), [])
 
   useEffect(() => {
     pushRef.current = () => void push()
@@ -150,6 +175,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       call: <T,>(method: HttpMethod, path: string, body?: unknown) => request<T>(method, path, body, ref.current.token),
       users: async (method: 'POST' | 'PATCH' | 'DELETE', body?: unknown, query = '') => enter(await request<BooksResponse>(method, 'users' + query, body, ref.current.token)),
       leave: async (body: unknown) => enter(await request<BooksResponse>('POST', 'leave', body, ref.current.token)),
+      workReport: async (body: object) => enter(await request<BooksResponse>('POST', 'work-report', body, ref.current.token)),
       attend: async (body: object) => enter(await request<BooksResponse>('POST', 'attendance', { ...body, tz: new Date().getTimezoneOffset() }, ref.current.token)),
     }
   }, [enter, leave])
@@ -160,6 +186,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [st.billing, st.session])
 
   const clearNotice = useCallback(() => setNotice(''), [])
-  const value = useMemo<StoreValue>(() => ({ ...st, act, sync, notice, clearNotice, setBilling, ...api }), [st, act, sync, notice, clearNotice, setBilling, api])
+  const value = useMemo<StoreValue>(() => ({ ...st, act, saveNow, sync, notice, clearNotice, setBilling, ...api }), [st, act, saveNow, sync, notice, clearNotice, setBilling, api])
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

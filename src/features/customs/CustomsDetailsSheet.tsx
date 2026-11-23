@@ -1,4 +1,4 @@
-import { byId, customsCalc, DEFAULT_PORT, DUTIES, num, todayISO, type DutyKey } from '@shared/domain'
+import { byId, customsCalc, DEFAULT_PORT, num, regimeOf, todayISO, type DutyKey } from '@shared/domain'
 import { useBooks } from '@/core/store/context'
 import { Field, FormSheet, useForm, useToast } from '@/ui'
 
@@ -10,7 +10,7 @@ export function CustomsDetailsSheet({ importId }: { importId: string }) {
   const [v, , bind, nbind] = useForm(() => ({
     hsCode: cu?.hsCode || '', port: cu?.port || DEFAULT_PORT, cnf: cu?.cnf || '', boeNo: cu?.boeNo || '', boeDate: cu?.boeDate || '', container: cu?.container || '',
     av: cu?.av ? String(cu.av) : '', freeUntil: cu?.freeUntil || '', demurragePerDay: cu?.demurragePerDay ? String(cu.demurragePerDay) : '',
-    ...(Object.fromEntries(DUTIES.map(([k]) => [k, cu?.rates[k] ? String(cu.rates[k]) : ''])) as Record<DutyKey, string>),
+    ...(Object.fromEntries(regimeOf(db).duties.map(([k]) => [k, cu?.rates[k] ? String(cu.rates[k]) : ''])) as Record<DutyKey, string>),
   }))
   if (!s) return null
   const exp = s.direction === 'export'
@@ -23,7 +23,7 @@ export function CustomsDetailsSheet({ importId }: { importId: string }) {
           data: {
             hsCode: v.hsCode.trim(), port: v.port.trim(), cnf: v.cnf.trim(), boeNo: v.boeNo.trim(), boeDate: v.boeDate, container: v.container.trim(),
             av: num(v.av), freeUntil: v.freeUntil, demurragePerDay: num(v.demurragePerDay),
-            rates: Object.fromEntries(DUTIES.map(([k]) => [k, num(v[k])])),
+            rates: Object.fromEntries(regimeOf(db).duties.map(([k]) => [k, num(v[k])])),
           },
         })
         toast('Customs details saved')
@@ -35,7 +35,7 @@ export function CustomsDetailsSheet({ importId }: { importId: string }) {
       <Field label={exp ? 'Bill of Export number' : 'Bill of Entry number'}><input {...bind('boeNo')} placeholder="e.g. C-184532" /></Field>
       <Field label={exp ? 'Bill of Export date' : 'Bill of Entry date'}><input type="date" {...bind('boeDate')} max={todayISO()} /></Field>
       <Field label="Assessable value (Tk)" hint="Leave empty to use invoice value plus freight and insurance." wide><input {...nbind('av')} placeholder="Worked out automatically" /></Field>
-      {DUTIES.map(([k, label]) => <Field key={k} label={`${label} %`}><input {...nbind(k)} placeholder="0" /></Field>)}
+      {regimeOf(db).duties.map(([k, label]) => <Field key={k} label={`${label} %`}><input {...nbind(k)} placeholder="0" /></Field>)}
       <Field label="Free time at port ends on"><input type="date" {...bind('freeUntil')} /></Field>
       <Field label="Demurrage per day after that (Tk)"><input {...nbind('demurragePerDay')} placeholder="0" /></Field>
     </FormSheet>

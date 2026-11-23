@@ -6,10 +6,16 @@ import { MethodSelect } from '@/components/MethodSelect'
 import { useBooks } from '@/core/store/context'
 import { SitePicker } from '@/components/SitePicker'
 import { Field, FormSheet, useForm, useToast } from '@/ui'
+import { useReceiveAccess } from '@/features/warehouse/receiveAccess'
 
-/** Record goods bought from a local supplier. `productId` picks the item, and its usual supplier, in advance. */
-export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: string; productId?: string }) {
-  const { db, act } = useBooks()
+/**
+ * Record a local supplier's bill. `productId` picks the item, and its usual supplier, in advance.
+ * The goods wait in the warehouse's "To receive" list until an admin or warehouse manager confirms them;
+ * someone who may receive can confirm at once (`inNow` ticks that by default, from the warehouse screen).
+ */
+export function NewPurchaseSheet({ supplierId, productId, inNow }: { supplierId?: string; productId?: string; inNow?: boolean }) {
+  const { db, act, saveNow } = useBooks()
+  const rx = useReceiveAccess()
   // without cost permission, goods are received by quantity and the price comes from the item's current cost
   const see = useSee()
   const toast = useToast()
@@ -22,6 +28,7 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
     siteId: siteStock(db).mainId,
     supplierId: sup?.id || '', billNo: 'PB-' + db.seq.pb, date: todayISO(), productId: first?.id || '', qty: '',
     rate: first?.cost ? String(first.cost) : '', terms: (sup?.terms || 'credit') as SupplierTerms, paid: '', method: 'Cash', tax: '',
+    now: !!inNow && rx.can, expected: todayISO(),
   })
   const [files, setFiles] = useState<Attachment[]>([])
   const purchaseRates = (db.taxRates || []).filter((r) => r.active && r.appliesTo !== 'sales' && r.rate > 0 && r.kind !== 'withholding')
@@ -30,10 +37,13 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
   const tax = num(v.tax)
   const amount = goods + tax
   return (
-    <FormSheet title="New purchase" crumb={preset ? preset.name : "Suppliers"} submit="Save purchase"
-      note="Goods go straight into warehouse stock. On credit, the unpaid part is added to what we owe this supplier."
-      onSubmit={() => {
+    <FormSheet title="New purchase" crumb={preset ? preset.name : "Suppliers"} submit={v.now ? 'Save and receive' : 'Save, send to warehouse'} busyLabel="Saving…"
+      note={v.now ? 'The goods go into warehouse stock now, checked in by you. On credit, the unpaid part is added to what we owe this supplier.'
+        : `The goods wait under Warehouse → To receive until ${rx.who.length ? rx.who.slice(0, 3).join(', ') : 'an admin or warehouse manager'}${rx.who.length > 3 ? ' or another warehouse manager' : ''} counts them in. Only then are they in stock. On credit, the unpaid part is added to what we owe this supplier.`}
+      onSubmit={async () => {
         if (!v.supplierId) return 'Add a supplier first.'
+        if (!v.date) return 'Pick the bill date.'
+        if (!v.now && v.expected && v.expected < v.date) return 'The goods cannot be due before the bill date.'
         if (!product) return 'Add the item first, under Products and stock.'
         if (!see.cost && !(product.cost > 0)) return 'This item has no cost yet. Ask someone who can see prices to record its first purchase.'
         const rate = see.cost ? num(v.rate) : product.cost
@@ -41,8 +51,13 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
         if (tax < 0) return 'VAT cannot be negative.'
         const paid = !see.cost ? 0 : v.terms === 'cash' ? amount : num(v.paid)
         if (paid > amount) return `Paid now cannot be more than the bill of ${tk(amount)}.`
-        act('newPurchase', { supplierId: v.supplierId, billNo: v.billNo.trim() || 'PB-' + db.seq.pb, date: v.date, productId: v.productId, qty: num(v.qty), rate, terms: see.cost ? v.terms : 'credit', paid, method: v.method, tax: tax || undefined, attachments: files.length ? files : undefined, siteId: v.siteId || undefined })
-        toast(`${fmt(num(v.qty))} ${product.unit} added to stock`)
+        const now = v.now && rx.can
+        if (now && v.date > todayISO()) return 'Goods cannot be received on a future date. Untick “received now” or change the date.'
+        const why = act('newPurchase', { supplierId: v.supplierId, billNo: v.billNo.trim() || 'PB-' + db.seq.pb, date: v.date, productId: v.productId, qty: num(v.qty), rate, terms: see.cost ? v.terms : 'credit', paid, method: v.method, tax: tax || undefined, attachments: files.length ? files : undefined, siteId: v.siteId || undefined, pending: !now, expected: now ? undefined : v.expected || undefined, by: rx.me })
+        if (why) return why
+        const saved = await saveNow()
+        if (saved) return saved
+        toast(now ? `${fmt(num(v.qty))} ${product.unit} added to stock` : `Bill saved. ${fmt(num(v.qty))} ${product.unit} waiting for the warehouse to check in`)
       }}>
       <Field label="Supplier" hint={(() => { const x = byId(db.suppliers, v.supplierId); return x ? [fullAddress(x), x.phone].filter(Boolean).join(' · ') || undefined : undefined })()}>
         <select {...bind('supplierId')}>
@@ -52,6 +67,13 @@ export function NewPurchaseSheet({ supplierId, productId }: { supplierId?: strin
       <Field label="Bill number"><input {...bind('billNo')} placeholder="e.g. PB-222" /></Field>
       <Field label="Date"><input type="date" {...bind('date')} /></Field>
       <SitePicker db={db} bind={bind('siteId')} />
+      {rx.can && (
+        <label className="check field wide">
+          <input type="checkbox" checked={v.now} onChange={(e) => set('now', e.target.checked)} />
+          <span>The goods are here and counted — receive them into stock now<small className="t-muted"> (leave unticked to confirm later from To receive)</small></span>
+        </label>
+      )}
+      {!v.now && <Field label="Goods expected on" hint="Shows as late in To receive after this day"><input type="date" min={v.date} {...bind('expected')} /></Field>}
       <Field label="Item">
         <select className="in" value={v.productId} onChange={(e) => {
           set('productId', e.target.value)

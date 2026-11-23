@@ -8,6 +8,7 @@ import { accessGuard, useBooks } from '@/core/store/context'
 import { Button, DataTable, Pill, Sheet, useSheetItem, useSheets, useToast, type SheetComponent } from '@/ui'
 import { AddFactorySheet } from './AddFactorySheet'
 import { NewFactoryOrderSheet } from './NewFactoryOrderSheet'
+import { SourceStockTable } from '@/features/warehouse/SourceStockTable'
 
 /** One factory: who they are, every order with them, and where the money stands. */
 export const FactoryDetailSheet: SheetComponent<{ factoryId: string }> = ({ factoryId }) => {
@@ -48,6 +49,8 @@ export const FactoryDetailSheet: SheetComponent<{ factoryId: string }> = ({ fact
           { label: 'Rate', align: 'right', render: (x) => money(x.o.rate) },
           { label: 'Status', align: 'right', render: (x) => <Pill tone={x.c.tone}>{x.c.status}</Pill> },
         ]} />
+      <h3 className="sheet-h">Their goods in our warehouses</h3>
+      <SourceStockTable kind="factory" id={f.id} name={f.name} />
       <h3 className="sheet-h">Contact, address and papers</h3>
       <PartyView p={f} name={f.name} />
       {f.note && <p className="t-muted">{f.note}</p>}
