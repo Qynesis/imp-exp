@@ -5,7 +5,7 @@
 import { MotionConfig, motion } from 'framer-motion'
 import { BUSINESS_TYPES, customsDocs } from '@shared/domain'
 import { Icon, type IconName } from '@/ui'
-import { PillTabs, Reveal, SectionHead, SiteFooter, SiteNav, VideoBg } from './parts'
+import { PillTabs, Reveal, SectionHead, SiteFooter, SiteNav } from './parts'
 import { ImageStack } from './Solutions'
 import '@fontsource-variable/plus-jakarta-sans'
 import './landing.css'
@@ -66,7 +66,7 @@ export default function GarmentsPage() {
             </div>
             <motion.div className="px-hero-cards one" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.15 }}>
               <div className="px-media-card tall">
-                <VideoBg src={M + 'garments-factory.mp4'} poster={M + 'garments-factory.jpg'} label="Workers on the sewing floor of a garment factory" />
+                <img className="px-video" src={M + 'garments-factory.jpg'} alt="Workers on the sewing floor of a garment factory" />
                 <span className="px-media-copy"><small><Icon name="sparkle" size={15} /> Garments and textiles</small><b>Made for the factory floor</b></span>
               </div>
             </motion.div>

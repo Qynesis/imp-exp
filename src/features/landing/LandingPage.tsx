@@ -52,7 +52,7 @@ const TRADES: { label: string; note: string; thumb: string; to: string }[] = [
 ]
 
 const WALL: { kind: 'img' | 'video'; src: string; poster?: string; title: string; note: string; to?: string; h: number; pos?: string }[] = [
-  { kind: 'video', src: 'hero-trade.mp4', poster: 'hero-trade.jpg', title: 'Imports and exports', note: 'LC to warehouse, every step confirmed', h: 0.62 },
+  { kind: 'img', src: 'hero-trade.jpg', title: 'Imports and exports', note: 'LC to warehouse, every step confirmed', h: 0.62 },
   { kind: 'img', src: 'container-yard.jpg', title: 'Every container accounted for', note: 'Landed cost into stock by itself', h: 1.3, pos: '50% 88%' },
   { kind: 'img', src: 'port-aerial.jpg', title: 'At the port', note: 'Customs stages with notes', h: 0.56 },
   { kind: 'video', src: 'insights-2.mp4', poster: 'insights-2.jpg', title: 'Business insights', note: 'Decide with data', h: 0.56 },
@@ -98,7 +98,7 @@ function Hero() {
       </div>
       <div className="px-hero-cards">
         <motion.a href="#/signup" className="px-media-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.15 }}>
-          <VideoBg src={M + 'hero-trade.mp4'} small={M + 'hero-trade-sm.mp4'} poster={M + 'hero-trade.jpg'} label="Aerial view of a container terminal" />
+          <img className="px-video" src={M + 'hero-trade.jpg'} alt="Aerial view of a container terminal" />
           <span className="px-media-copy"><small><Icon name="clock" size={15} /> Free trial</small><b>Imports, exports and LC</b><em>Start free →</em></span>
         </motion.a>
         <motion.a href="#/signin" className="px-media-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.25 }}>

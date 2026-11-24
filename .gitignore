@@ -31,3 +31,6 @@ server/data
 # server build output
 dist-server
 *.tsbuildinfo
+
+# raw source videos are too big for GitHub (100 MB limit); the site uses the compressed copies in public/media
+public/videos/
