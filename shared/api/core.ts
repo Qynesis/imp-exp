@@ -20,8 +20,7 @@ import { localAnswer } from '../assistant/local'
 import { applyBusinessTypes, isBusinessType } from '../domain/catalog'
 import { MESSAGING_FIELDS, MessagingError, sendMessage, type MessagingKeys } from '../messaging'
 import { bookParcel, COURIER_PROVIDERS, courierAreas, courierBalance, CourierError, FIELDS, parcelStatus, testCourier, trackParcel, type BookRequest, type CourierKeys } from '../courier'
-import { canSee, defaultRoles, isAdmin, levelFor, OWNER_ROLE_ID, receiptRefusal } from '../domain/permissions'
-import { businessDigest, rulesBrief, WINDOWS, type Brief, type BusinessDigest, type InsightWindow } from '../domain/calc'
+import { defaultRoles, isAdmin, OWNER_ROLE_ID, receiptRefusal } from '../domain/permissions'
 import { reportAccess } from '../domain/calc/workReports'
 import { applyAction } from '../domain/actions'
 import { demoDb, emptyDb } from '../domain/seed'
@@ -90,9 +89,6 @@ export interface AssistantRequest {
 }
 /** Answers with an AI model; supplied by the server when it has a key. */
 export type AssistantRunner = (req: AssistantRequest) => Promise<{ reply: string; used: string[] }>
-/** The AI analyst: reads a digest of the business and writes a briefing, or answers one question about it. */
-export interface AnalystRequest { digest: BusinessDigest; question?: string }
-export type AnalystRunner = (req: AnalystRequest) => Promise<Omit<Brief, 'source'>>
 
 export interface ApiOptions {
   platformEmail: string
@@ -109,8 +105,6 @@ export interface ApiOptions {
   messaging?: Partial<Record<MessageChannel, MessagingKeys>>
   /** The AI assistant. Without it, questions are answered by the built-in answerer. */
   assistant?: AssistantRunner
-  /** The AI analyst for Business insights. Without it, briefings are put together from the numbers. */
-  analyst?: AnalystRunner
   billing?: {
     /** Days of free trial for a new company (default 14). */
     trialDays?: number
@@ -739,39 +733,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const id = str(req.query.get('id'))
       if (/^f[0-9a-f]{20}$/.test(id)) await store.del(`file:${ctx.acc.tenantId}:${id}`)
       return { ok: true }
-    },
-
-    /* ----- AI analyst for Business insights ----- */
-    /**
-     * A briefing on the business for the chosen period, or an answer to one question about it.
-     * Claude reads only a rounded digest limited to what the person's role may see; without an AI key,
-     * or when the AI fails, the briefing is put together from the numbers and says so.
-     */
-    'POST insights/brief': async (req) => {
-      const ctx = await auth(req)
-      const uid = ctx.acc.userId
-      const db = ctx.tenant.db
-      if (levelFor(db, uid, 'insights') === 'none') throw new ApiFailure(403, 'Your role cannot open Business insights.')
-      const b = obj(req.body)
-      const days = (WINDOWS as number[]).includes(Number(b.days)) ? (Number(b.days) as InsightWindow) : 90
-      const question = str(b.question).trim().slice(0, 600)
-      const key = 'brief|' + ctx.acc.tenantId
-      const f = chats.get(key)
-      if (f && f.until > Date.now() && f.n >= 10) throw new ApiFailure(429, 'Too many AI requests in a minute. Wait a little and try again.')
-      if (!f || f.until < Date.now()) chats.set(key, { n: 1, until: Date.now() + 60000 })
-      else f.n++
-      const digest = businessDigest(db, days, { cost: canSee(db, uid, 'cost'), profit: canSee(db, uid, 'profit') })
-      const rules = rulesBrief(digest)
-      if (!opts.analyst) {
-        return { brief: { ...rules, answer: question ? 'The AI analyst is not set up on this server, so questions cannot be answered yet. The briefing above is worked out from your numbers.' : undefined }, ai: false, at: new Date().toISOString() }
-      }
-      try {
-        const brief: Brief = { ...(await opts.analyst({ digest, question: question || undefined })), source: 'ai' }
-        return { brief, ai: true, at: new Date().toISOString() }
-      } catch (e) {
-        // never leave the screen empty: give the numbers' briefing and say why the AI's is missing
-        return { brief: rules, ai: true, error: e instanceof Error ? e.message : 'The AI analyst failed.', at: new Date().toISOString() }
-      }
     },
 
     /* ----- assistant ----- */

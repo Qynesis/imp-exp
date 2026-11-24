@@ -162,7 +162,7 @@ export function SiteFooter() {
         <div>
           <b>Product</b>
           <button type="button" onClick={() => { navigate(''); setTimeout(() => scrollTo('features'), 50) }}>Features</button>
-          <button type="button" onClick={() => { navigate(''); setTimeout(() => scrollTo('insights'), 50) }}>Insights and AI</button>
+          <button type="button" onClick={() => { navigate(''); setTimeout(() => scrollTo('insights'), 50) }}>Business insights</button>
           <button type="button" onClick={() => { navigate(''); setTimeout(() => scrollTo('solutions'), 50) }}>Solutions</button>
         </div>
         <div>

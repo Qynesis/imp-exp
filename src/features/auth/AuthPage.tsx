@@ -14,7 +14,7 @@ import '@/features/landing/landing.css'
 const POINTS: [IconName, string][] = [
   ['ship', 'Imports, exports, LC and customs'], ['building', 'Warehouses with confirmed receiving'],
   ['factory', 'Factory orders and production'], ['receipt', 'Dealer sales, dues and delivery'],
-  ['sparkle', 'Insights and an AI analyst'],
+  ['trend', 'Business insights and charts'],
 ]
 
 const PHOTOS = [

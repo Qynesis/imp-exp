@@ -30,7 +30,7 @@ const PAINS: { icon: IconName; title: string; text: string }[] = [
   { icon: 'ship', title: 'Export LC and shipments', text: 'Contract or LC, ready, shipped and paid at the bank rate, with buyer PO, back-to-back LC and UD numbers on the shipment.' },
   { icon: 'badge', title: 'Workers and wages', text: 'Phone check-in at the factory gate, leave, monthly salaries, daily wages and contract pay, with written reports from supervisors.' },
   { icon: 'wallet', title: 'Costs and cash', text: 'Supplier dues, factory bills, expenses, VAT and the profit on each export, with cash, bank, bKash and Nagad in one cashbook.' },
-  { icon: 'sparkle', title: 'Insights and AI', text: 'What will ship next month, which buyer is slowing, what material to reorder, and a plain-words briefing whenever you ask.' },
+  { icon: 'trend', title: 'Business insights', text: 'What will ship next month, which buyer is slowing and what material to reorder, in simple charts.' },
 ]
 
 const FLOW: { title: string; text: string }[] = [

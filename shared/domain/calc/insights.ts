@@ -285,36 +285,6 @@ export const concentration = (db: Db, days: InsightWindow) =>
     return { top1: top(1), top5: top(5), top10: top(10), hhi, buyers: rows.length, biggest: rows[0] || null }
   })
 
-/* ---------- profit bridge ---------- */
-
-export interface BridgeStep { key: string; label: string; value: number }
-/**
- * Why profit moved between the window before and this one: selling more or less (volume), at higher
- * or lower prices (price), with goods costing more or less (cost), and items new or gone (mix).
- */
-export const profitBridge = (db: Db, days: InsightWindow) =>
-  memo(db, 'ins:bridge:' + days, () => {
-    const rows = productInsights(db, days)
-    let volume = 0, price = 0, cost = 0, mix = 0
-    for (const r of rows) {
-      if (r.qty > 0 && r.prevQty > 0) {
-        const prevUnitMargin = r.prevPrice - r.prevUnitCost
-        volume += (r.qty - r.prevQty) * prevUnitMargin
-        price += r.qty * (r.price - r.prevPrice)
-        cost -= r.qty * (r.unitCost - r.prevUnitCost)
-      } else mix += r.profit - r.prevProfit
-    }
-    const before = sum(rows, (r) => r.prevProfit)
-    const after = sum(rows, (r) => r.profit)
-    const steps: BridgeStep[] = [
-      { key: 'volume', label: 'Sold more or less', value: volume },
-      { key: 'price', label: 'Selling prices', value: price },
-      { key: 'cost', label: 'Buying and making costs', value: cost },
-      { key: 'mix', label: 'Items new or no longer sold', value: mix },
-    ]
-    return { before, after, steps, change: after - before }
-  })
-
 /* ---------- cash ---------- */
 
 export interface CashForecastPoint { key: string; label: string; inflow: number; outflow: number; balance: number }
@@ -521,17 +491,5 @@ export const decisions = (db: Db, days: InsightWindow = 90): Decision[] =>
     const rank = { high: 0, medium: 1, low: 2 }
     return out.sort((a, b) => rank[a.priority] - rank[b.priority] || b.impact - a.impact)
   })
-
-/* ---------- what if ---------- */
-
-export interface WhatIf { price: number; cost: number; volume: number }
-/** Profit next period if prices, costs and quantities change by these fractions (0.05 = +5%). */
-export function whatIf(rows: Pick<ProductInsight, 'sales' | 'profit'>[], w: WhatIf) {
-  const sales = sum(rows, (r) => r.sales)
-  const cost = sum(rows, (r) => r.sales - r.profit)
-  const newSales = sales * (1 + w.price) * (1 + w.volume)
-  const newCost = cost * (1 + w.cost) * (1 + w.volume)
-  return { sales, profit: sales - cost, newSales, newProfit: newSales - newCost, change: newSales - newCost - (sales - cost) }
-}
 
 const round = (n: number) => (n >= 100 ? Math.round(n / 10) * 10 : Math.round(n))

@@ -35,8 +35,8 @@ const FEATURES: { icon: IconName; title: string; text: string }[] = [
   { icon: 'send', title: 'WhatsApp and SMS', text: 'Bills, payments and reminders sent by themselves or one by one.' },
   { icon: 'wallet', title: 'Cash, accounts and VAT', text: 'Cash, bank, bKash and Nagad balances, chart of accounts, VAT and P&L.' },
   { icon: 'badge', title: 'Staff, attendance and pay', text: 'Phone check-in, leave, salaries, daily wages and written work reports.' },
-  { icon: 'trend', title: 'Business insights', text: 'Forecasts, unusual days, dealer segments, profit bridge and cash cycle, in charts.' },
-  { icon: 'sparkle', title: 'AI analyst', text: 'A plain-words briefing and ranked decisions; ask it questions in English or বাংলা.' },
+  { icon: 'trend', title: 'Business insights', text: 'Sales forecast, dealer groups, stock cover and cash ahead, in simple charts.' },
+  { icon: 'sparkle', title: 'Ask the assistant', text: 'Ask in English or বাংলা: who owes the most, what to reorder, how sales went.' },
 ]
 
 const TRADES: { label: string; note: string; thumb: string; to: string }[] = [
@@ -55,13 +55,13 @@ const WALL: { kind: 'img' | 'video'; src: string; poster?: string; title: string
   { kind: 'video', src: 'hero-trade.mp4', poster: 'hero-trade.jpg', title: 'Imports and exports', note: 'LC to warehouse, every step confirmed', h: 0.62 },
   { kind: 'img', src: 'container-yard.jpg', title: 'Every container accounted for', note: 'Landed cost into stock by itself', h: 1.3, pos: '50% 88%' },
   { kind: 'img', src: 'port-aerial.jpg', title: 'At the port', note: 'Customs stages with notes', h: 0.56 },
-  { kind: 'video', src: 'insights-2.mp4', poster: 'insights-2.jpg', title: 'Insights and AI', note: 'Decide with data', h: 0.56 },
+  { kind: 'video', src: 'insights-2.mp4', poster: 'insights-2.jpg', title: 'Business insights', note: 'Decide with data', h: 0.56 },
   { kind: 'img', src: 'supermarket-aisle.jpg', title: 'Cash-and-carry aisles', note: 'Pallets, shelves and stock in one view', h: 1.3 },
   { kind: 'img', src: 'container-terminal.jpg', title: 'Exports out on time', note: 'Ready, shipped and paid', h: 0.66 },
   { kind: 'img', src: 'warehouse-racks.jpg', title: 'Godowns with codes', note: 'Stock per warehouse, always counted', h: 1.25 },
   { kind: 'img', src: 'shelves-aerial.jpg', title: 'Shelves that never run dry', note: 'Reorder alerts and days of stock', h: 0.56 },
   { kind: 'img', src: 'retail-market.jpg', title: 'Supplying shops and markets', note: 'Fast bills, returns and dues', h: 1.3 },
-  { kind: 'video', src: 'insights-1.mp4', poster: 'insights-1.jpg', title: 'Reports that answer questions', note: 'Forecasts and unusual days', h: 0.56 },
+  { kind: 'video', src: 'insights-1.mp4', poster: 'insights-1.jpg', title: 'Reports that answer questions', note: 'Forecasts and trends', h: 0.56 },
 ]
 
 const JOURNEY: { icon: IconName; title: string; text: string }[] = [
@@ -76,7 +76,7 @@ const FAQ = [
   ['Does it work for a small trading company?', 'Yes. Start with sales, stock and dues, and switch on imports, exports, factory orders or accounts when your business needs them.'],
   ['Can my staff use it on their phones?', 'Every screen works on phones as well as computers. Each user signs in with their own login, and their role decides what they can see and change.'],
   ['Is it only for Bangladesh?', 'It is made in Bangladesh, with Taka, BIN, VAT, bKash and Nagad set up. Pick China, USA, India, UAE and more for their currency and tax rates.'],
-  ['Is my data private?', 'Each company has its own private books. Staff see only what their role allows, and the AI analyst reads a rounded summary limited to the same.'],
+  ['Is my data private?', 'Each company has its own private books, and staff see only what their role allows.'],
 ]
 
 /* ---------------------------------------------------------------- sections */
@@ -89,7 +89,7 @@ function Hero() {
           Import, export and distribution software, from port to payment.
         </motion.h1>
         <motion.p className="px-hero-sub big" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1 }}>
-          LC and customs, warehouses, factory orders, dealer sales, dues and cash, with insights and an AI analyst that tell you what to do next.
+          LC and customs, warehouses, factory orders, dealer sales, dues and cash, with simple insights that show what needs your attention.
         </motion.p>
         <motion.div className="px-actions" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.2 }}>
           <a className="px-btn" href="#/signup">Start free <Icon name="arrowRight" size={18} /></a>
@@ -103,7 +103,7 @@ function Hero() {
         </motion.a>
         <motion.a href="#/signin" className="px-media-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.25 }}>
           <VideoBg src={M + 'insights-2.mp4'} poster={M + 'insights-2.jpg'} label="Reviewing sales charts on a phone" />
-          <span className="px-media-copy"><small><Icon name="sparkle" size={15} /> New</small><b>Insights and AI analyst</b><em>See the demo →</em></span>
+          <span className="px-media-copy"><small><Icon name="sparkle" size={15} /> New</small><b>Business insights</b><em>See the demo →</em></span>
         </motion.a>
       </div>
     </section>
@@ -194,9 +194,9 @@ function Journey() {
 function Insights() {
   const items: { icon: IconName; title: string; text: string }[] = [
     { icon: 'trend', title: 'Sales forecast', text: 'The next three months with a likely range, learned from your own sales.' },
-    { icon: 'alert', title: 'Unusual days', text: 'Spikes and drops against the normal week, each with the reason.' },
+    { icon: 'wallet', title: 'Cash ahead', text: 'Days to collect and to pay, and your cash for the next 90 days.' },
     { icon: 'users', title: 'Dealer segments', text: 'Champions, loyal, at risk and lost, so you know who to visit.' },
-    { icon: 'sparkle', title: 'AI briefing', text: 'A short report and ranked decisions; ask it questions in English or বাংলা.' },
+    { icon: 'check', title: 'What to do next', text: 'Reorders, overdue dealers and cash gaps, ranked by the money involved.' },
   ]
   return (
     <section id="insights" className="px-section px-soft">
@@ -205,7 +205,7 @@ function Insights() {
           <div className="px-video-card"><VideoBg src={M + 'insights-2.mp4'} poster={M + 'insights-2.jpg'} label="Business owner reviewing sales charts on a phone" /></div>
         </Reveal>
         <div>
-          <SectionHead center={false} kicker="Insights and AI analyst" title="Decide with data, not guesswork" text="Charts that answer real questions: what will sell next month, which dealer is slipping, why profit moved and whether cash will last." />
+          <SectionHead center={false} kicker="Business insights" title="Decide with data, not guesswork" text="Charts that answer real questions: what will sell next month, which dealer is slipping, what to reorder and whether cash will last." />
           <ul className="px-checks">
             {items.map((x) => <li key={x.title}><span className="px-feature-icon sm"><Icon name={x.icon} size={18} /></span><span><b>{x.title}</b><small>{x.text}</small></span></li>)}
           </ul>
@@ -259,7 +259,7 @@ function Closing() {
 export default function LandingPage() {
   const tabs = useMemo(() => [
     { id: 'top', label: 'Home' }, { id: 'industries', label: 'Industries' }, { id: 'solutions', label: 'Solutions' }, { id: 'features', label: 'Features' },
-    { id: 'insights', label: 'Insights and AI', badge: 'NEW' }, { id: 'faq', label: 'FAQ' },
+    { id: 'insights', label: 'Insights', badge: 'NEW' }, { id: 'faq', label: 'FAQ' },
   ], [])
   return (
     <MotionConfig reducedMotion="user">

@@ -1,16 +1,14 @@
 import { useState } from 'react'
 import {
-  dealerInsights, fdate, fday, productInsights, salesAnomalies, salesDrivers, salesForecast, salesHeat, tk, tkShort, windowDates, WEEKDAYS, type InsightWindow,
+  dealerInsights, productInsights, salesDrivers, salesForecast, tk, tkShort, type InsightWindow,
 } from '@shared/domain'
 import { useSee } from '@/app/useSee'
 import { CompareBars } from '@/components/charts/CompareBars'
 import { DivergingBars } from '@/components/charts/DivergingBars'
 import { ForecastChart } from '@/components/charts/ForecastChart'
-import { Heatmap } from '@/components/charts/Heatmap'
-import { ShareBar } from '@/components/charts/ShareBar'
 import { Hidden } from '@/components/Hidden'
 import { useBooks } from '@/core/store/context'
-import { Card, DataTable, Pill, Segmented, Stat, useSheets } from '@/ui'
+import { Card, Segmented, Stat, useSheets } from '@/ui'
 import { DealerInsightSheet, ProductInsightSheet } from './InsightSheets'
 import { Growth } from './Growth'
 import { pct } from './pct'
@@ -24,17 +22,12 @@ export function Overview({ days }: { days: InsightWindow }) {
   const dls = dealerInsights(db, days)
   const fc = salesForecast(db)
   const drivers = salesDrivers(db, days)
-  const heat = salesHeat(db, 12)
-  const anomalies = salesAnomalies(db, days)
   const [by, setBy] = useState<'dealers' | 'products' | 'areas'>('dealers')
   const sales = prods.reduce((s, r) => s + r.sales, 0)
   const before = prods.reduce((s, r) => s + r.prevSales, 0)
   const profit = prods.reduce((s, r) => s + r.profit, 0)
   const prevProfit = prods.reduce((s, r) => s + r.prevProfit, 0)
   const next = fc.next[1] || fc.next[0]
-  const w = windowDates(days)
-  const areas = new Map<string, number>()
-  for (const d of dls) areas.set(d.area || 'No area', (areas.get(d.area || 'No area') || 0) + d.sales)
   const change = (now: number, b: number) => (b > 0 ? (now - b) / b : null)
   return (
     <>
@@ -63,29 +56,6 @@ export function Overview({ days }: { days: InsightWindow }) {
         </Card>
       </div>
 
-      <div className="two-col">
-        <Card icon="pin" title="Sales by area" sub={`Share of the last ${days} days’ sales.`}>
-          <ShareBar parts={[...areas.entries()].map(([name, value]) => ({ id: name, name, value }))} format={tkShort} />
-        </Card>
-        <Card icon="box" title="Sales by item" sub={`Share of the last ${days} days’ sales.`}>
-          <ShareBar parts={prods.map((p) => ({ id: p.id, name: p.name, value: p.sales }))} format={tkShort} />
-        </Card>
-      </div>
-
-      <div className="two-col">
-        <Card icon="calendar" title="When we sell" sub={`The last 12 weeks, Saturday to Friday. ${heat.best ? `Best day on average: ${heat.best}.` : ''}`}>
-          <Heatmap columns={[...WEEKDAYS]} max={heat.max} format={tk}
-            rows={heat.rows.map((r) => ({ label: fday(r.week).replace(/^\w+,?\s*/, ''), cells: r.days.map((d) => ({ key: d.date, label: fdate(d.date), value: d.value })) }))} />
-        </Card>
-        <Card icon="alert" title="Unusual days" sub={`Days in ${fdate(w.from)} – ${fdate(w.to)} far from the usual for that weekday, found by comparing each day with the 8 weeks before it.`}>
-          <DataTable rows={anomalies} rowKey={(a) => a.date} empty="No unusual days: sales followed their normal weekly pattern."
-            columns={[
-              { label: 'Day', primary: true, render: (a) => <span className="two-line"><b>{fdate(a.date)}</b><small className="t-muted">{a.why}</small></span> },
-              { label: '', render: (a) => <Pill tone={a.kind === 'spike' ? 'good' : 'warn'}>{a.kind === 'spike' ? '↑ Spike' : '↓ Drop'}</Pill> },
-              { label: 'Sales', align: 'right', render: (a) => <span className="two-line right"><b className="nowrap">{tkShort(a.value)}</b><small className="t-muted nowrap">usual {tkShort(a.expected)}</small></span> },
-            ]} />
-        </Card>
-      </div>
     </>
   )
 }
