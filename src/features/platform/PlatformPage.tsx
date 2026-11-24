@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import type { CompanySummary } from '@shared/api/contract'
-import { PAY_METHODS, planById, STATUS_LABEL, type BillingPayment, type BillingSummary } from '@shared/billing'
+import type { CompanySummary, EnterpriseEnquiry } from '@shared/api/contract'
+import { PAY_METHODS, planLabel, STATUS_LABEL, termLabel, type BillingPayment, type BillingSummary } from '@shared/billing'
 import { BUSINESS_TYPES, fdate, fmt, plural } from '@shared/domain'
 import { BRAND, POWERED_BY } from '@/config/brand'
 import { ApiError } from '@/core/api/client'
@@ -63,6 +63,7 @@ export default function PlatformPage() {
         <Stat icon="users" label="Users" value={list ? userCount : '…'} />
         <Stat icon="card" label="Payments to approve" value={list ? claimCount : '…'} tone={claimCount ? 'warn' : undefined} sub={claimCount ? 'Check each transaction ID, then approve' : 'Nothing waiting'} />
       </div>
+      <Enquiries names={Object.fromEntries((list || []).map((c) => [c.id, c.name]))} />
       <SearchBox value={q} onChange={setQ} placeholder="Search company, user or email" label="Search companies" />
       {list && !shown.length && <Card><Empty>{list.length ? 'No company matches.' : 'No company has signed up yet.'}</Empty></Card>}
       {shown.map((c) => (
@@ -128,7 +129,7 @@ function CompanyBilling({ id, name, billing, claims, onChange }: { id: string; n
       <div className="btn-row">
         <Pill tone={TONE[billing.status]}>{STATUS_LABEL[billing.status]}</Pill>
         <span className="t-muted">
-          {billing.status === 'free' ? 'Free, no end date' : `${billing.plan === 'trial' ? 'Trial' : planById(billing.plan)?.label + ' plan'} · ${billing.status === 'expired' ? 'ended' : 'until'} ${fdate(billing.until?.slice(0, 10))}${billing.status !== 'expired' ? ` · ${plural(billing.daysLeft, 'day')} left` : ''}`}
+          {billing.status === 'free' ? 'Free, no end date' : `${billing.plan === 'trial' ? 'Trial' : planLabel(billing.plan) + ' plan'} · ${billing.status === 'expired' ? 'ended' : 'until'} ${fdate(billing.until?.slice(0, 10))}${billing.status !== 'expired' ? ` · ${plural(billing.daysLeft, 'day')} left` : ''}`}
         </span>
         <Button size="sm" variant="secondary" onClick={extend}>Add days</Button>
         {billing.status === 'free'
@@ -138,13 +139,48 @@ function CompanyBilling({ id, name, billing, claims, onChange }: { id: string; n
       {claims.map((p) => (
         <div key={p.id} className="alert-strip info">
           <div>
-            <b>{PAY_METHODS[p.method]} ৳{fmt(p.amount)} for the {planById(p.plan)?.label.toLowerCase()} plan</b>
+            <b>{PAY_METHODS[p.method]} ৳{fmt(p.amount)} for {termLabel(p.months)} of {planLabel(p.plan)}</b>
             <span>Transaction <b>{p.tranId}</b>{p.sender ? ` from ${p.sender}` : ''}{p.paidOn ? ` on ${fdate(p.paidOn)}` : ''} · sent by {p.by}{p.note ? ` · “${p.note}”` : ''}</span>
           </div>
-          <Button size="sm" onClick={() => void run({ action: 'approve', paymentId: p.id }, `Approved: ${name} is on the ${planById(p.plan)?.label.toLowerCase()} plan`)}>Approve</Button>
+          <Button size="sm" onClick={() => void run({ action: 'approve', paymentId: p.id }, `Approved: ${name} is on ${planLabel(p.plan)}`)}>Approve</Button>
           <Button size="sm" variant="secondary" onClick={() => reject(p)}>Reject</Button>
         </div>
       ))}
     </div>
+  )
+}
+
+const ENQ_TONE = { new: 'warn', contacted: 'info', closed: 'neutral' } as const
+
+/** "Contact us" requests for the Enterprise plan, newest first. */
+function Enquiries({ names }: { names: Record<string, string> }) {
+  const { platform } = useStore()
+  const toast = useToast()
+  const [rows, setRows] = useState<EnterpriseEnquiry[] | null>(null)
+  const [all, setAll] = useState(false)
+  useEffect(() => {
+    platform<{ enquiries: EnterpriseEnquiry[] }>('GET', 'enquiries').then((r) => setRows(r.enquiries)).catch((e: Error) => toast(e.message))
+  }, [platform, toast])
+  const mark = (id: string, status: EnterpriseEnquiry['status']) =>
+    platform<{ enquiries: EnterpriseEnquiry[] }>('POST', 'enquiry', { id, status }).then((r) => setRows(r.enquiries)).catch((e: Error) => toast(e.message))
+  if (!rows?.length) return null
+  const open = rows.filter((r) => r.status !== 'closed')
+  return (
+    <Card icon="chat" title="Enterprise requests" sub={`${open.filter((r) => r.status === 'new').length} new · ${rows.length} in all`}
+      action={<Button size="sm" variant="ghost" onClick={() => setAll(!all)}>{all ? 'Hide closed' : 'Show closed'}</Button>}>
+      <DataTable pageSize={10} rows={all ? rows : open} rowKey={(r) => r.id} empty="No open requests."
+        columns={[
+          { label: 'Company', primary: true, render: (r) => <span className="two-line"><b>{r.company}</b><small className="t-muted">{fdate(r.at.slice(0, 10))}{r.tenantId ? ` · signed up as ${names[r.tenantId] || r.tenantId}` : ' · from the website'}</small></span> },
+          { label: 'Contact', render: (r) => <span className="two-line"><span>{r.name}</span><small className="t-muted">{[r.phone, r.email].filter(Boolean).join(' · ')}</small></span> },
+          { label: 'Needs', render: (r) => <span className="two-line"><span>{r.needs}</span>{r.branches && <small className="t-muted">{r.branches}</small>}</span> },
+          { label: '', align: 'right', render: (r) => (
+            <span className="row-actions">
+              <Pill tone={ENQ_TONE[r.status]}>{r.status === 'new' ? 'New' : r.status === 'contacted' ? 'Contacted' : 'Closed'}</Pill>
+              {r.status === 'new' && <Button size="sm" variant="secondary" onClick={() => void mark(r.id, 'contacted')}>Contacted</Button>}
+              {r.status !== 'closed' ? <Button size="sm" variant="ghost" onClick={() => void mark(r.id, 'closed')}>Close</Button> : <Button size="sm" variant="ghost" onClick={() => void mark(r.id, 'new')}>Reopen</Button>}
+            </span>
+          ) },
+        ]} />
+    </Card>
   )
 }

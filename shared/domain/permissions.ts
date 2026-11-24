@@ -18,6 +18,7 @@ export const PAGES: readonly (readonly [PageId, string])[] = [
   ['sell', 'Sell to dealer'],
   ['dealers', 'Dealers'],
   ['sales-analytics', 'Sales analytics'],
+  ['insights', 'Business insights and decisions'],
   ['cashbook', 'Cashbook and dues'],
   ['employees', 'Employees'],
   ['attendance', 'Attendance (see and correct)'],
@@ -75,6 +76,8 @@ const INHERITS: Partial<Record<PageId, PageId[]>> = {
   // whoever keeps stock receives goods
   warehouse: ['products', 'raw-materials'],
   'sales-analytics': ['reports'],
+  // deep-dive analytics are for the people who see the reports
+  insights: ['reports'],
   // stock people book trips, the accountant enters what transport costs
   transport: ['products', 'cashbook'],
   // whoever sells or arranges delivery books parcels

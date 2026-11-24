@@ -180,11 +180,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [enter, leave])
 
-  // an ended subscription makes the books read-only; the platform owner can still make changes
-  useEffect(() => {
-    ref.current.locked = st.billing?.status === 'expired' && !st.session?.viaPlatform ? 'Your subscription has ended, so changes cannot be saved. Choose a plan in Settings → Subscription.' : ''
-  }, [st.billing, st.session])
-
   const clearNotice = useCallback(() => setNotice(''), [])
   const value = useMemo<StoreValue>(() => ({ ...st, act, saveNow, sync, notice, clearNotice, setBilling, ...api }), [st, act, saveNow, sync, notice, clearNotice, setBilling, api])
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

@@ -331,7 +331,10 @@ earlier in − out.
 ## 4.14 Subscription
 
 - A new company gets a `TRIAL_DAYS` trial (default 14). The demo company is `free`.
-- Paying adds the plan's months after the current end (trial days left are kept). Plans: quarterly 3,000, half-yearly 5,400, yearly 9,600 Tk.
+- Plans: **Basic** 2,900 Tk a month and **Pro** 5,900 Tk a month, paid for 1, 3, 6 or 12 months at a time (`TERMS`). The amount is monthly × months, with no discount. The server rejects any other number of months.
+- **Enterprise** has no price and cannot be paid online. "Contact us" sends a request (`POST /api/enquiry`): company, name, phone or email, size and needs. Visitors to the public page can send one; if sent from inside the app, the company is attached. Requests are limited to 5 per client per hour, and the newest 500 are kept under `enquiries`. The platform owner sees them on the platform page and marks each as contacted or closed.
+- Payments made under the old quarterly, half-yearly and yearly plans keep their plan ID, so receipts and history still show the right name (`planLabel`).
+- Paying adds the months after the current end (trial days left are kept).
 - **Online**: SSLCommerz (bKash, Nagad, Rocket, cards). A payment is marked paid only after the server validates `val_id` with the gateway, and the amount and transaction id match. It is idempotent.
 - **Manual**: "I paid" creates a `pending` payment with the transaction id. The platform owner approves (same effect as paid) or rejects with a reason.
 - **When ended**: every write route answers 402 (books save, users, courier booking, sending messages). Reading still works. The platform owner, through "Open books", can still save.
@@ -496,3 +499,86 @@ The permission guard checks the page level before the service runs (05 §5.4). S
 - **Factory goods** (`receiveShipment`) are checked too: the quantity cannot be more than is still due, the date cannot be in the future or before the order was placed, and the receipt records who checked it in (`by`).
 - **Who may receive:** an admin, or a role that has *edit* access to Warehouse (`canReceive`). The server applies `receiptRefusal` on every save and returns 403 when anyone else turns a pending bill into stock, saves a bill straight into stock, or adds a factory receipt. Someone without that access gets a pending bill. A person who can receive may tick "received now" on a new bill.
 - **Confirmation popups wait for the server** (`saveNow`). If the server refuses, the reason appears inside the popup rather than in a later toast.
+
+## Business insights (deep-dive analytics and decisions)
+
+All calculations are in `shared/domain/calc/insights.ts`. They are pure and cached per version of the books. Each looks at a window of 30, 90, 180 or 365 days ending today, and compares it with the window of the same length just before it.
+
+- **Products** (`productInsights`):
+  - Sales, profit, margin and quantity per item, with growth on the window before.
+  - **ABC class:** A items make the first 80% of sales, B the next 15%, C the rest.
+  - **Stock cover:** how many days the stock lasts at the window's pace of goods going out.
+  - **Turns a year.**
+  - **Health:**
+    - *reorder*: under 21 days of cover, or out of stock while still in use;
+    - *low*: at or below the item's alert level;
+    - *overstock*: over 180 days of cover;
+    - *dead*: stock with no movement in the window.
+- **Dealers** (`dealerInsights`): RFM segments, based on days since the last bill, bills in the last 365 days, and the monthly average.
+  - **Lost:** no bill for over 90 days.
+  - **At risk:** quiet for more than twice their usual gap between bills (and at least 30 days), with at least 3 bills in the year.
+  - **New:** first bill within the window.
+  - **Champion:** bought within 30 days, at least 6 bills in the year, and among the top 30% by monthly average.
+  - **Loyal:** at least 4 bills in the year.
+  - **Occasional:** everyone else.
+  - Unpaid money is grouped by days past the due date: not yet due, 1–30, 31–60, 61–90, over 90.
+- **Concentration** (`concentration`): the share of sales from the top 1, 5 and 10 dealers, and the Herfindahl index.
+- **Profit bridge** (`profitBridge`): splits the change in gross profit into four parts, which always add up to the total change:
+  - volume: change in quantity × the old margin per unit;
+  - price: new quantity × change in price;
+  - cost: new quantity × change in unit cost, with the sign reversed;
+  - mix: items sold in only one of the two windows.
+- **Cash** (`cashInsights`):
+  - DSO = receivables ÷ credit sales × 90 days;
+  - DIO = stock value ÷ cost of goods sold × 90 days;
+  - DPO = payables ÷ purchases × 90 days;
+  - cash cycle = DSO + DIO − DPO.
+  - **90-day forecast:** today's cash balance, plus or minus the average monthly money in and out from the cashbook over the last 90 days. The first month also adds half of the dealer dues that are already overdue.
+- **Suppliers** (`supplierInsights`):
+  - spend and share;
+  - price rises: the latest bill's rate more than 3% above the earlier average for that item;
+  - share of goods short or damaged;
+  - average days late against the expected date.
+- **Trade** (`tradeLeadTimes`): the average and longest days between consecutive shipment steps, the landed-cost breakdown of received imports, and shipments whose next step is past its expected date.
+- **Decisions** (`decisions`): rules over all of the above, each with a priority, the money at stake and where to act. They are ranked by priority, then by money.
+  - Reorder or clear stock; overstock.
+  - Margin below 5%, or costs up while the price stayed flat.
+  - Dealers more than 30 days overdue, or gone quiet (at risk).
+  - One dealer bringing over 30% of sales.
+  - Cash forecast going below zero, or DSO over 45 days.
+  - Supplier price rises, or short deliveries above 2%.
+  - Shipments late on their next step.
+- **What-if** (`whatIf`): new sales = sales × (1 + price change) × (1 + volume change); new cost = cost × (1 + cost change) × (1 + volume change).
+- **Who can see it:** the screen's access follows Reports unless an admin sets it. Money figures follow the "see costs" and "see profit" permissions, and the profit tab needs "see profit".
+
+## AI analytics and the AI analyst
+
+**Statistical analytics** (`shared/domain/calc/ai.ts`) run on the books themselves. No data leaves the app for these.
+- **Forecast** (`salesForecast`):
+  - fits a straight-line trend through the finished months (up to 36);
+  - adds a seasonal index per calendar month once 24 months of history exist (clamped to 0.6–1.6);
+  - projects this month and the next two;
+  - the 80% range is ±1.28 × the standard deviation of past errors, widened by √(1 + 0.5 × months ahead);
+  - "reliable" needs at least 6 months of history.
+- **Unusual days** (`salesAnomalies`):
+  - each day is compared with the median of the same weekday over the 8 weeks before it;
+  - the spread is the median absolute deviation × 1.4826, with a floor of 15% of the median;
+  - a day is flagged at 3 or more spreads away, and only if it is also at least 30% off the usual;
+  - weekdays with fewer than 4 selling days in those 8 weeks are skipped (for example, Fridays);
+  - each flagged day gets a reason: the biggest bill on a spike, or the regular dealers who did not buy on a drop.
+- **Change drivers** (`salesDrivers`): the change in sales by dealer, item and area against the period before. The contributions add up to the total change.
+- **When we sell** (`salesHeat`): sales by day for 12 weeks, Saturday to Friday.
+
+**AI analyst**: `POST /api/insights/brief` with `{ days, question? }`.
+- **Who can use it:** anyone whose role can open Business insights. It is limited to 10 requests a minute per company.
+- **What Claude reads:** `businessDigest`, a rounded summary of the period. It contains no phone numbers or addresses. Cost and profit fields say "hidden" when the person's role may not see them, and decisions that would reveal those figures are left out.
+- **The call** (server only; `claudeAnalyst` in `server/assistant.ts`):
+  - model `claude-opus-5-5`, effort `high`;
+  - JSON-schema structured output: headline, summary, wins, risks, actions (title, why, impact), and answer;
+  - a cached system prompt;
+  - server-side refusal fallback: `fallbacks: "default"` with the `server-side-fallback-2026-07-01` beta.
+- **When the AI can't help:**
+  - with no `ANTHROPIC_API_KEY` set, or in the browser-only copy, the reply is `rulesBrief`, put together from the numbers, with `ai: false`;
+  - if the AI fails (refusal, unreadable output, bad key, rate limit, network), the reply is the rules briefing plus `error`.
+  
+  Either way, the screen always shows a briefing.

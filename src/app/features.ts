@@ -57,6 +57,7 @@ export const FEATURES: FeatureDef[] = [
   { id: 'accounts', icon: 'layers', label: 'Accounts, tax and VAT', group: 'Money', load: () => import('@/features/accounts') },
   { id: 'fixed-assets', icon: 'building', label: 'Fixed assets', group: 'Money', load: () => import('@/features/fixed-assets') },
   { id: 'investors', icon: 'pie', label: 'Investors', group: 'Money', load: () => import('@/features/investors') },
+  { id: 'insights', icon: 'target', label: 'Business insights', group: 'Money', load: () => import('@/features/insights') },
   { id: 'reports', icon: 'chart', label: 'Reports', group: 'Money', load: () => import('@/features/reports') },
   { id: 'settings', icon: 'settings', label: 'Users, roles and settings', group: 'Money', load: () => import('@/features/settings') },
 ]

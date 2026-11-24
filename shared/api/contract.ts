@@ -84,6 +84,22 @@ export interface CompanySummary {
   claims?: BillingPayment[]
 }
 
+/** POST /api/enquiry: someone asking about the Enterprise plan. */
+export interface EnterpriseEnquiry {
+  id: string
+  at: string
+  company: string
+  name: string
+  phone: string
+  email: string
+  /** Branches, companies or users, as they put it. */
+  branches: string
+  needs: string
+  /** The company it came from, when sent from inside the app. */
+  tenantId?: string
+  status: 'new' | 'contacted' | 'closed'
+}
+
 /** GET /api/billing */
 export interface BillingView {
   summary: BillingSummary

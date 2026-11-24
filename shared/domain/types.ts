@@ -20,6 +20,7 @@ export type PageId =
   | 'factory-orders'
   | 'raw-materials'
   | 'sales-analytics'
+  | 'insights'
   | 'transport'
   | 'courier'
   | 'deliveries'
@@ -84,7 +85,7 @@ export interface Company {
 /* ---------- custom fields ---------- */
 export type CustomEntity = 'product' | 'supplier' | 'dealer' | 'shipment' | 'factoryOrder' | 'employee'
 export type FieldType = 'text' | 'number' | 'date' | 'select'
-export type BusinessTypeId = 'general' | 'food' | 'machinery' | 'electronics' | 'toys' | 'medical'
+export type BusinessTypeId = 'general' | 'garments' | 'food' | 'machinery' | 'electronics' | 'toys' | 'medical'
 
 export interface FieldDef {
   id: string

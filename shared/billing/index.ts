@@ -3,22 +3,44 @@
  * so nobody can extend their own access), and paid online through SSLCommerz (bKash, Nagad, cards)
  * or by sending money to the platform owner and pressing "I paid", which the owner then approves.
  */
-export type PlanId = 'quarterly' | 'half-yearly' | 'yearly'
+export type PlanId = 'basic' | 'pro'
+/** Plans sold before Basic and Pro. Old payments keep them, so receipts and history still read right. */
+export type LegacyPlanId = 'quarterly' | 'half-yearly' | 'yearly'
 export interface Plan {
   id: PlanId
   label: string
-  months: number
-  price: number
+  /** Taka per month. */
+  monthly: number
+  /** One line on who it is for. */
+  tagline: string
+  features: string[]
   badge?: string
   popular?: boolean
 }
 export const PLANS: Plan[] = [
-  { id: 'quarterly', label: 'Quarterly', months: 3, price: 3000 },
-  { id: 'half-yearly', label: 'Half-yearly', months: 6, price: 5400, badge: 'Save 10%' },
-  { id: 'yearly', label: 'Yearly', months: 12, price: 9600, badge: 'Most popular · Save 20%', popular: true },
+  {
+    id: 'basic', label: 'Basic', monthly: 2900, tagline: 'For a trading or distribution business getting organised',
+    features: ['Selling, invoices and dealers', 'Products, stock and warehouses', 'Suppliers, purchases and dues', 'Cashbook and reports', 'Staff logins with roles', 'Data backup and support'],
+  },
+  {
+    id: 'pro', label: 'Pro', monthly: 5900, badge: 'Most popular', popular: true, tagline: 'For importers, exporters and manufacturers',
+    features: ['Everything in Basic', 'Imports, exports, LC and customs', 'Factory orders and raw materials', 'Transport, courier and WhatsApp/SMS', 'Accounts, VAT, fixed assets and investors', 'AI assistant and priority support'],
+  },
 ]
-export const PLAN_FEATURES = ['Every screen, unlimited invoices', 'Imports, factory orders, stock, sales and accounts', 'Staff logins with roles', 'Courier booking and WhatsApp/SMS', 'Data backup and support']
+/** The largest companies: priced to fit, so they talk to us. */
+export const ENTERPRISE = {
+  label: 'Enterprise',
+  tagline: 'For groups, many branches or special needs',
+  features: ['Everything in Pro', 'Customised screens, reports and workflows', 'Several companies and branches', 'Your own server or domain', 'Data migration and staff training', 'A dedicated account manager'],
+}
+/** How many months can be paid at once. */
+export const TERMS = [1, 3, 6, 12] as const
 export const planById = (id: string): Plan | undefined => PLANS.find((p) => p.id === id)
+export const planPrice = (p: Plan, months: number): number => p.monthly * months
+const LEGACY: Record<LegacyPlanId, string> = { quarterly: 'Quarterly', 'half-yearly': 'Half-yearly', yearly: 'Yearly' }
+/** A plan's name, including plans no longer sold. */
+export const planLabel = (id: string): string => planById(id)?.label || LEGACY[id as LegacyPlanId] || id
+export const termLabel = (months: number): string => (months === 1 ? '1 month' : months === 12 ? '12 months (1 year)' : `${months} months`)
 export const DEFAULT_TRIAL_DAYS = 14
 
 /** How someone paid. online: through the payment gateway (it tells us bKash, Nagad or card). test: simulated, nothing charged. */
@@ -34,7 +56,7 @@ export interface BillingPayment {
   tranId: string
   /** When it was made, ISO date and time. */
   at: string
-  plan: PlanId
+  plan: PlanId | LegacyPlanId
   months: number
   amount: number
   method: PayMethod
@@ -57,7 +79,7 @@ export interface BillingRecord {
   /** Paid access ends; null while still on the trial. */
   paidUntil: string | null
   /** The last plan paid for. 'free' never ends (the demo company, or set by the platform owner). */
-  plan: PlanId | 'trial' | 'free'
+  plan: PlanId | LegacyPlanId | 'trial' | 'free'
   payments: BillingPayment[]
   seq: number
 }
@@ -65,7 +87,7 @@ export interface BillingRecord {
 export type BillingStatus = 'trial' | 'active' | 'expired' | 'free'
 export interface BillingSummary {
   status: BillingStatus
-  plan: PlanId | 'trial' | 'free'
+  plan: PlanId | LegacyPlanId | 'trial' | 'free'
   /** Access ends; null for free. */
   until: string | null
   /** Whole days left, 0 when ended. */

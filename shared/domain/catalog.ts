@@ -68,6 +68,16 @@ export interface BusinessType {
 /** Each kind of trade brings its own extra fields and customs documents. */
 export const BUSINESS_TYPES: Record<BusinessTypeId, BusinessType> = {
   general: { label: 'General trading and FMCG', fields: [], docs: [] },
+  garments: {
+    label: 'Garments and textiles',
+    fields: [
+      f('product', 'Style number'), f('product', 'Buyer'), f('product', 'Season'), f('product', 'Colour'), f('product', 'Size'),
+      f('product', 'Fabric and composition'), f('product', 'GSM', 'number'), f('product', 'HS code'),
+      f('shipment', 'Buyer PO number'), f('shipment', 'Back-to-back LC number'), f('shipment', 'UD number'),
+      f('dealer', 'Buyer code'), f('supplier', 'Mill or trims category', 'select', ['Fabric mill', 'Yarn', 'Trims and accessories', 'Packaging', 'Washing or printing']),
+    ],
+    docs: ['Back-to-back LC copy', 'UD (utilization declaration)', 'Fabric test report', 'Certificate of origin (GSP)'],
+  },
   food: {
     label: 'Food and edible goods',
     fields: [f('product', 'Batch number'), f('product', 'Expiry date', 'date'), f('product', 'BSTI licence number')],

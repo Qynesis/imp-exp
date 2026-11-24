@@ -6,7 +6,6 @@ import { go, href, useRoute } from '@/core/router'
 import { accessGuard, useBooks } from '@/core/store/context'
 import { BrandMark, Button, cls, Icon, Logo, useSheets, useToast } from '@/ui'
 import { Assistant } from './Assistant'
-import { BillingBar } from './BillingBar'
 import { BellButton, DesktopAlerts } from './Notifications'
 import { FEATURES, type FeatureRouteProps } from './features'
 import { Account, MoreMenuSheet, NavList } from './Navigation'
@@ -106,7 +105,6 @@ export function Shell() {
       <DesktopAlerts />
       <Assistant />
       <main className="main">
-        <BillingBar />
         <div className={cls('page', nav.motion, readonly && 'readonly')} key={pageKey}>
           {readonly && feature.id !== 'my-work' && <div className="view-only" role="note">View only. Your role cannot make changes on this screen.</div>}
           <ErrorBoundary screen>

@@ -1,5 +1,5 @@
 import {
-  assetSummary, expenseAccountTotals, fmt, foCalc, investors, isLowStock, orderBook, payables, pendingDeliveries, profitAndLoss, receivables, taxReport, thisMonth,
+  assetSummary, decisions, expenseAccountTotals, fmt, foCalc, investors, isLowStock, orderBook, payables, pendingDeliveries, profitAndLoss, receivables, taxReport, thisMonth,
   tkShort, todayISO, tradeOverview, trips, type Db, type PageId,
 } from '@shared/domain'
 import { useAccess } from '@/app/useAccess'
@@ -19,6 +19,7 @@ const TILES: Partial<Record<PageId, { title: string; info: (db: Db) => string }>
   cashbook: { title: 'Cash flow and dues', info: (db) => `Owe ${tkShort(payables(db).total)} · due in ${tkShort(receivables(db).total)}` },
   deliveries: { title: 'Delivery and returns', info: (db) => { const n = pendingDeliveries(db).filter((x) => !x.inv.sample).length; return n ? `${plural(n, 'bill')} to deliver` : 'All delivered' } },
   'sales-analytics': { title: 'Sales reports', info: (db) => `${tkShort(orderBook(db).month.value)} this month` },
+  insights: { title: 'Business insights', info: (db) => { const n = decisions(db).filter((d) => d.priority === 'high').length; return n ? `${n} to act on now` : 'Nothing urgent' } },
   reports: { title: 'Reports (profit, dues, stock)', info: (db) => { const n = profitAndLoss(db, thisMonth()).net; return `${n < 0 ? 'Loss' : 'Profit'} ${tkShort(Math.abs(n))} this month` } },
   'factory-orders': { title: 'Factory orders', info: (db) => { const n = db.factoryOrders.filter((o) => foCalc(db, o).pending > 0).length; return n ? `${plural(n, 'order')} in progress` : 'Nothing pending' } },
   suppliers: { title: 'Suppliers and purchases', info: (db) => { const owe = payables(db).rows.filter((r) => r.kind === 'supplier').reduce((s, r) => s + r.due, 0); return owe ? `We owe ${tkShort(owe)}` : 'Nothing owed' } },
@@ -45,7 +46,7 @@ const safeInfo = (f: ((db: Db) => string) | undefined, db: Db): string => {
 }
 
 /** The everyday screens first, in the order traders use them; the rest follow in menu order. */
-const ORDER: PageId[] = ['sell', 'products', 'dealers', 'cashbook', 'deliveries', 'sales-analytics', 'reports', 'messages', 'expenses', 'accounts', 'raw-materials', 'suppliers', 'factory-orders', 'imports', 'customs', 'transport', 'courier', 'employees', 'fixed-assets', 'investors', 'settings']
+const ORDER: PageId[] = ['sell', 'products', 'dealers', 'cashbook', 'deliveries', 'sales-analytics', 'insights', 'reports', 'messages', 'expenses', 'accounts', 'raw-materials', 'suppliers', 'factory-orders', 'imports', 'customs', 'transport', 'courier', 'employees', 'fixed-assets', 'investors', 'settings']
 
 const TONE: Record<NavGroup, string> = { Buying: 'buy', Stock: 'stock', Selling: 'sell', Money: 'money' }
 

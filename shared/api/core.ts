@@ -10,22 +10,24 @@
  *   books:<id>        {version, db}                    that company's books
  *   billing:<id>      BillingRecord                    trial, plan, paid until, payments
  *   billingtx:<tran>  {tenantId}                       finds the company when the payment gateway calls back
+ *   enquiries         EnterpriseEnquiry[]              "Contact us" requests for the Enterprise plan, newest first
  */
 import {
-  gatewayReady, GatewayError, markPaid, newBilling, planById, startCheckout, summarize, validatePayment,
+  gatewayReady, GatewayError, markPaid, newBilling, planById, planPrice, startCheckout, summarize, TERMS, validatePayment,
   type BillingPayment, type BillingRecord, type GatewayKeys, type PayMethod,
 } from '../billing'
 import { localAnswer } from '../assistant/local'
 import { applyBusinessTypes, isBusinessType } from '../domain/catalog'
 import { MESSAGING_FIELDS, MessagingError, sendMessage, type MessagingKeys } from '../messaging'
 import { bookParcel, COURIER_PROVIDERS, courierAreas, courierBalance, CourierError, FIELDS, parcelStatus, testCourier, trackParcel, type BookRequest, type CourierKeys } from '../courier'
-import { defaultRoles, isAdmin, OWNER_ROLE_ID, receiptRefusal } from '../domain/permissions'
+import { canSee, defaultRoles, isAdmin, levelFor, OWNER_ROLE_ID, receiptRefusal } from '../domain/permissions'
+import { businessDigest, rulesBrief, WINDOWS, type Brief, type BusinessDigest, type InsightWindow } from '../domain/calc'
 import { reportAccess } from '../domain/calc/workReports'
 import { applyAction } from '../domain/actions'
 import { demoDb, emptyDb } from '../domain/seed'
 import { demoDubaiDb } from '../domain/seedDubai'
 import { isDb, type CourierProvider, type Db, type MessageChannel } from '../domain/types'
-import type { BillingView, CompanySummary, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
+import type { BillingView, CompanySummary, EnterpriseEnquiry, DemoLogin, HttpMethod, SessionInfo, StatusResponse } from './contract'
 
 /* ---------- ports ---------- */
 export interface Account {
@@ -88,6 +90,9 @@ export interface AssistantRequest {
 }
 /** Answers with an AI model; supplied by the server when it has a key. */
 export type AssistantRunner = (req: AssistantRequest) => Promise<{ reply: string; used: string[] }>
+/** The AI analyst: reads a digest of the business and writes a briefing, or answers one question about it. */
+export interface AnalystRequest { digest: BusinessDigest; question?: string }
+export type AnalystRunner = (req: AnalystRequest) => Promise<Omit<Brief, 'source'>>
 
 export interface ApiOptions {
   platformEmail: string
@@ -104,6 +109,8 @@ export interface ApiOptions {
   messaging?: Partial<Record<MessageChannel, MessagingKeys>>
   /** The AI assistant. Without it, questions are answered by the built-in answerer. */
   assistant?: AssistantRunner
+  /** The AI analyst for Business insights. Without it, briefings are put together from the numbers. */
+  analyst?: AnalystRunner
   billing?: {
     /** Days of free trial for a new company (default 14). */
     trialDays?: number
@@ -333,13 +340,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     return fresh
   }
   const billingSummary = async (tenantId: string) => summarize(await billingOf(tenantId), Date.now())
-  /** Changes stop when the subscription has ended. The platform owner can still fix things. */
-  const needActive = async (ctx: Ctx) => {
-    if (ctx.email === PLATFORM) return
-    if ((await billingSummary(ctx.acc.tenantId)).status === 'expired') {
-      throw new ApiFailure(402, 'Your subscription has ended, so changes cannot be saved. Choose a plan in Settings → Subscription to continue.')
-    }
-  }
   const billingView = async (tenantId: string): Promise<BillingView> => {
     const rec = await billingOf(tenantId)
     return {
@@ -357,6 +357,13 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     rec.payments.push(pay)
     return pay
   }
+  /** How many months a payment is for: one of TERMS, one month when not said. */
+  const termOf = (v: unknown): number => {
+    const n = v === undefined || v === null || v === '' ? 1 : Number(v)
+    if (!(TERMS as readonly number[]).includes(n)) throw bad(`Pay for ${TERMS.join(', ')} months.`)
+    return n
+  }
+  const enquiryTimes = new Map<string, number[]>()
   const appLink = (hash: string) => `${(B.publicUrl || '').replace(/\/+$/, '')}/#/${hash}`
 
   // slow down password guessing: 8 failed sign-ins per client and address per 10 minutes
@@ -456,7 +463,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const next = b.db
       if (!isDb(next)) throw bad('Those are not valid books.')
       if (b.baseVersion !== version) throw new ApiFailure(409, 'Someone else changed the books.')
-      await needActive(ctx)
       const uid = ctx.acc.userId
       const me = cur.users.find((u) => u.id === uid)
       const myRole = me && cur.roles.find((r) => r.id === me.roleId)
@@ -514,7 +520,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'POST courier/book': async (req) => {
       const ctx = await auth(req)
       needEditor(ctx)
-      await needActive(ctx)
       const b = obj(req.body)
       const r: BookRequest = {
         invoice: str(b.invoice), name: str(b.name), phone: str(b.phone), address: str(b.address), cod: Number(b.cod) || 0, note: str(b.note),
@@ -587,7 +592,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'POST messaging/send': async (req) => {
       const ctx = await auth(req)
       needEditor(ctx)
-      await needActive(ctx)
       const b = obj(req.body)
       const ch = str(b.channel) as MessageChannel
       if (ch !== 'whatsapp' && ch !== 'sms') throw bad('Which channel?')
@@ -613,13 +617,14 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const plan = planById(str(b.plan))
       const method = str(b.method) as PayMethod
       const tranId = str(b.tranId).trim()
-      if (!plan) throw bad('Choose a plan.')
+      if (!plan) throw bad('Choose Basic or Pro. For Enterprise, contact us.')
+      const months = termOf(b.months)
       if (!['bkash', 'nagad', 'rocket', 'bank'].includes(method)) throw bad('How did you pay?')
       if (tranId.length < 4) throw bad('Enter the transaction ID from your payment message or bank slip.')
       const rec = await billingOf(ctx.acc.tenantId)
       if (rec.payments.some((p) => p.tranId.toLowerCase() === tranId.toLowerCase() && p.status !== 'rejected')) throw new ApiFailure(409, 'That transaction ID was already sent.')
       const pay = newPayment(rec, ctx.acc.tenantId, {
-        tranId, plan: plan.id, months: plan.months, amount: plan.price, method, sender: str(b.sender).trim().slice(0, 60),
+        tranId, plan: plan.id, months, amount: planPrice(plan, months), method, sender: str(b.sender).trim().slice(0, 60),
         paidOn: str(b.paidOn).slice(0, 10), note: str(b.note).trim().slice(0, 300), status: 'pending', by: ctx.email,
       })
       await store.set('billing:' + ctx.acc.tenantId, rec)
@@ -631,20 +636,22 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const ctx = await auth(req)
       needAdmin(ctx)
       const plan = planById(str(obj(req.body).plan))
-      if (!plan) throw bad('Choose a plan.')
+      if (!plan) throw bad('Choose Basic or Pro. For Enterprise, contact us.')
+      const months = termOf(obj(req.body).months)
+      const amount = planPrice(plan, months)
       const live = gatewayReady(B.gateway)
       if (!live && !B.testPayments) throw bad('Online payment is not set up yet. Pay by bKash or bank transfer and press “I paid”.')
       if (live && !B.publicUrl) throw new ApiFailure(503, 'The server needs APP_URL set before it can take payments online.')
       const rec = await billingOf(ctx.acc.tenantId)
       const tranId = ('SB' + ctx.acc.tenantId.slice(0, 4) + Date.now().toString(36) + kit.randomHex(2)).toUpperCase()
-      const pay = newPayment(rec, ctx.acc.tenantId, { tranId, plan: plan.id, months: plan.months, amount: plan.price, method: live ? 'online' : 'test', status: 'started', by: ctx.email })
+      const pay = newPayment(rec, ctx.acc.tenantId, { tranId, plan: plan.id, months, amount, method: live ? 'online' : 'test', status: 'started', by: ctx.email })
       await store.set('billing:' + ctx.acc.tenantId, rec)
-      if (!live) return { test: true, tranId, amount: plan.price, id: pay.id }
+      if (!live) return { test: true, tranId, amount, id: pay.id }
       await store.set('billingtx:' + tranId, { tenantId: ctx.acc.tenantId })
       const me = ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)
       try {
         const url = await startCheckout(B.gateway!, {
-          tranId, amount: plan.price, plan: plan.label, returnUrl: `${B.publicUrl!.replace(/\/+$/, '')}/api/billing/return`,
+          tranId, amount, plan: `${plan.label}, ${months} month${months === 1 ? '' : 's'}`, returnUrl: `${B.publicUrl!.replace(/\/+$/, '')}/api/billing/return`,
           company: ctx.tenant.db.company.name, email: ctx.email, phone: ctx.tenant.db.company.phone || '',
         })
         await store.audit(`billing checkout ${pay.id} ${plan.id} for ${ctx.acc.tenantId} by ${me?.email || ctx.email}`)
@@ -707,7 +714,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const ctx = await auth(req)
       // staff linked to an employee may attach files to their own reports, even on a view-only role
       if (!ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)?.employeeId) needEditor(ctx)
-      await needActive(ctx)
       const b = obj(req.body)
       const name = str(b.name).trim().slice(0, 120) || 'document'
       const type = str(b.type)
@@ -733,6 +739,39 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       const id = str(req.query.get('id'))
       if (/^f[0-9a-f]{20}$/.test(id)) await store.del(`file:${ctx.acc.tenantId}:${id}`)
       return { ok: true }
+    },
+
+    /* ----- AI analyst for Business insights ----- */
+    /**
+     * A briefing on the business for the chosen period, or an answer to one question about it.
+     * Claude reads only a rounded digest limited to what the person's role may see; without an AI key,
+     * or when the AI fails, the briefing is put together from the numbers and says so.
+     */
+    'POST insights/brief': async (req) => {
+      const ctx = await auth(req)
+      const uid = ctx.acc.userId
+      const db = ctx.tenant.db
+      if (levelFor(db, uid, 'insights') === 'none') throw new ApiFailure(403, 'Your role cannot open Business insights.')
+      const b = obj(req.body)
+      const days = (WINDOWS as number[]).includes(Number(b.days)) ? (Number(b.days) as InsightWindow) : 90
+      const question = str(b.question).trim().slice(0, 600)
+      const key = 'brief|' + ctx.acc.tenantId
+      const f = chats.get(key)
+      if (f && f.until > Date.now() && f.n >= 10) throw new ApiFailure(429, 'Too many AI requests in a minute. Wait a little and try again.')
+      if (!f || f.until < Date.now()) chats.set(key, { n: 1, until: Date.now() + 60000 })
+      else f.n++
+      const digest = businessDigest(db, days, { cost: canSee(db, uid, 'cost'), profit: canSee(db, uid, 'profit') })
+      const rules = rulesBrief(digest)
+      if (!opts.analyst) {
+        return { brief: { ...rules, answer: question ? 'The AI analyst is not set up on this server, so questions cannot be answered yet. The briefing above is worked out from your numbers.' : undefined }, ai: false, at: new Date().toISOString() }
+      }
+      try {
+        const brief: Brief = { ...(await opts.analyst({ digest, question: question || undefined })), source: 'ai' }
+        return { brief, ai: true, at: new Date().toISOString() }
+      } catch (e) {
+        // never leave the screen empty: give the numbers' briefing and say why the AI's is missing
+        return { brief: rules, ai: true, error: e instanceof Error ? e.message : 'The AI analyst failed.', at: new Date().toISOString() }
+      }
     },
 
     /* ----- assistant ----- */
@@ -770,7 +809,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'POST users': async (req) => {
       const ctx = await auth(req)
       needAdmin(ctx)
-      await needActive(ctx)
       const b = obj(req.body)
       const email = cleanEmail(b.email)
       const name = str(b.name).trim()
@@ -795,7 +833,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'PATCH users': async (req) => {
       const ctx = await auth(req)
       needAdmin(ctx)
-      await needActive(ctx)
       const b = obj(req.body)
       const { db } = ctx.tenant
       const user = db.users.find((u) => u.id === b.id)
@@ -833,7 +870,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
      */
     'POST leave': async (req) => {
       const ctx = await auth(req)
-      await needActive(ctx)
       const b = obj(req.body)
       const me = ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)
       const employeeId = me?.employeeId || ''
@@ -861,7 +897,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
      */
     'POST attendance': async (req) => {
       const ctx = await auth(req)
-      await needActive(ctx)
       const b = obj(req.body)
       const me = ctx.tenant.db.users.find((u) => u.id === ctx.acc.userId)
       const employeeId = me?.employeeId || ''
@@ -893,7 +928,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
      */
     'POST work-report': async (req) => {
       const ctx = await auth(req)
-      await needActive(ctx)
       const b = obj(req.body)
       const db = ctx.tenant.db
       const me = db.users.find((u) => u.id === ctx.acc.userId)
@@ -932,7 +966,6 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
     'DELETE users': async (req) => {
       const ctx = await auth(req)
       needAdmin(ctx)
-      await needActive(ctx)
       const id = req.query.get('id')
       const { db } = ctx.tenant
       const user = db.users.find((u) => u.id === id)
@@ -944,6 +977,54 @@ export function createApi(store: KvStore, kit: CryptoKit, opts: ApiOptions) {
       await store.del('account:' + user.email)
       await dropSessions(user.email)
       return { db, version: ctx.tenant.version }
+    },
+
+    /**
+     * "Contact us" for the Enterprise plan. Open to visitors of the public page as well as signed-in
+     * companies (then the company is attached). Limited per client so it cannot be flooded.
+     */
+    'POST enquiry': async (req) => {
+      const b = obj(req.body)
+      const clip = (v: unknown, n: number) => str(v).trim().slice(0, n)
+      const e: EnterpriseEnquiry = {
+        id: 'ENQ-' + Date.now().toString(36).toUpperCase(), at: new Date().toISOString(),
+        company: clip(b.company, 120), name: clip(b.name, 80), phone: clip(b.phone, 30), email: cleanEmail(b.email).slice(0, 120),
+        branches: clip(b.branches, 40), needs: clip(b.needs, 1500), status: 'new',
+      }
+      if (!e.company) throw bad('Enter your company name.')
+      if (!e.name) throw bad('Enter your name.')
+      if (!/^[+\d][\d\s-]{6,}$/.test(e.phone) && !validEmail(e.email)) throw bad('Give a phone number or an email address so we can reach you.')
+      if (e.email && !validEmail(e.email)) throw bad('That email address does not look right.')
+      if (e.needs.length < 10) throw bad('Tell us a little about what you need.')
+      const now = Date.now()
+      const recent = (enquiryTimes.get(req.client) || []).filter((t) => t > now - 3600000)
+      if (recent.length >= 5) throw new ApiFailure(429, 'You have sent several requests already. We will be in touch; or try again in an hour.')
+      enquiryTimes.set(req.client, [...recent, now])
+      const s = req.token ? await sessionOf(req.token) : null
+      if (s && !s.platform && s.exp > now) {
+        const acc = s.as ? s.as : await store.get<Account>('account:' + s.email)
+        if (acc) e.tenantId = acc.tenantId
+      }
+      const list = (await store.get<EnterpriseEnquiry[]>('enquiries')) || []
+      await store.set('enquiries', [e, ...list].slice(0, 500))
+      await store.audit(`enterprise enquiry ${e.id} from ${e.company}${e.tenantId ? ` (company ${e.tenantId})` : ''}`)
+      return { id: e.id }
+    },
+    'GET platform/enquiries': async (req) => {
+      await platformAuth(req)
+      return { enquiries: (await store.get<EnterpriseEnquiry[]>('enquiries')) || [] }
+    },
+    'POST platform/enquiry': async (req) => {
+      await platformAuth(req)
+      const b = obj(req.body)
+      const list = (await store.get<EnterpriseEnquiry[]>('enquiries')) || []
+      const e = list.find((x) => x.id === str(b.id))
+      if (!e) throw bad('No such request.')
+      const status = str(b.status)
+      if (!['new', 'contacted', 'closed'].includes(status)) throw bad('Unknown status.')
+      e.status = status as EnterpriseEnquiry['status']
+      await store.set('enquiries', list)
+      return { enquiries: list }
     },
 
     'GET platform/companies': async (req) => {

@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ApiOptions, KvStore } from '../shared/api/core'
-import { claudeAssistant } from './assistant'
+import { claudeAnalyst, claudeAssistant } from './assistant'
 import { fileStore } from './stores/file'
 import { missingStore, postgresStore } from './stores/postgres'
 
@@ -36,6 +36,7 @@ export const apiOptions = (): ApiOptions => ({
     sms: { apiKey: env('SMS_API_KEY'), senderId: env('SMS_SENDER_ID'), gateway: env('SMS_GATEWAY') },
   },
   assistant: claudeAssistant(env('ANTHROPIC_API_KEY')),
+  analyst: claudeAnalyst(env('ANTHROPIC_API_KEY')),
   billing: {
     trialDays: Number(env('TRIAL_DAYS')) || 14,
     testPayments: env('BILLING_TEST_PAYMENTS') === '1',

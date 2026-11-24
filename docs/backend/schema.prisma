@@ -284,6 +284,9 @@ enum InvestorTxnKind {
 enum SubscriptionPlan {
   trial
   free
+  basic
+  pro
+  // older plans, kept for past payments
   quarterly
   half_yearly @map("half-yearly")
   yearly

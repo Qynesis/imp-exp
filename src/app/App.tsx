@@ -11,13 +11,15 @@ import { Splash } from './Loading'
 const AuthPage = lazy(() => import('@/features/auth/AuthPage'))
 // the public landing page carries the animation libraries, so only signed-out visitors download it
 const LandingPage = lazy(() => import('@/features/landing/LandingPage'))
+const GarmentsPage = lazy(() => import('@/features/landing/GarmentsPage'))
 const PlatformPage = lazy(() => import('@/features/platform/PlatformPage'))
 
 
 /** Signed out: the landing page, unless the visitor asked for sign-in or sign-up. */
 function SignedOut() {
   const [page] = useRoute()
-  return page === 'signin' || page === 'signup' ? <AuthPage /> : <LandingPage />
+  if (page === 'signin' || page === 'signup') return <AuthPage />
+  return page === 'garments' ? <GarmentsPage /> : <LandingPage />
 }
 
 function Gate() {
